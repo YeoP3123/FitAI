@@ -24,11 +24,11 @@ const Header: React.FC = () => {
           <span className="text-2xl font-bold">FitAI</span>
         </div>
 
-        {/* 메뉴 */}
+        {/* 네비게이션 메뉴 */}
         <div className="hidden md:flex items-center space-x-8">
-          {["운동", "자세교정", "커뮤니티", "내 기록"].map((menu) => (
+          {["운동", "자세교정", "커뮤니티", "내 기록"].map((menu, idx) => (
             <a
-              key={menu}
+              key={idx}
               href="#"
               className="hover:text-orange-500 transition-colors duration-300 relative group"
             >
@@ -38,7 +38,7 @@ const Header: React.FC = () => {
           ))}
         </div>
 
-        {/* 로그인 / 시작하기 버튼 */}
+        {/* 버튼 영역 */}
         <div className="flex items-center space-x-4">
           <button className="px-4 py-2 text-sm font-medium hover:text-orange-500 transition-colors duration-300">
             로그인
