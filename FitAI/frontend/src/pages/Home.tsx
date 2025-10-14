@@ -3,7 +3,7 @@ import React from "react";
 
 const Home: React.FC = () => {
   return (
-    <div className="bg-black text-white font-['Inter']">
+    <div className="bg-[#1E1F23] text-white font-['Inter']">
       {/* Hero Section */}
       <section className="min-h-screen flex flex-col items-center justify-center px-6 text-center">
         <h1 className="text-5xl md:text-7xl font-extrabold mb-6 leading-tight">
@@ -45,7 +45,7 @@ const Home: React.FC = () => {
       </section>
 
       {/* 운동 모드 섹션 */}
-      <section className="py-24 px-6 bg-gray-900">
+      <section className="py-24 px-6 bg-[#1E1F23]">
         <div className="max-w-6xl mx-auto text-center mb-16">
           <h2 className="text-4xl md:text-6xl font-extrabold mb-4 text-orange-500">
             운동의 새로운 경험
@@ -57,7 +57,7 @@ const Home: React.FC = () => {
 
         <div className="grid md:grid-cols-2 gap-8 max-w-6xl mx-auto">
           {/* 운동 모드 */}
-          <div className="bg-gray-800 p-10 rounded-3xl border border-gray-700 hover:bg-gray-750 transition">
+          <div className="bg-[#2A2B30] p-10 rounded-3xl border border-gray-700 hover:bg-gray-750 transition">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 flex items-center justify-center mb-6">
               <svg
                 className="w-7 h-7 text-white"
@@ -86,7 +86,7 @@ const Home: React.FC = () => {
           </div>
 
           {/* 자세 교정 */}
-          <div className="bg-gray-800 p-10 rounded-3xl border border-gray-700 hover:bg-gray-750 transition">
+          <div className="bg-[#2A2B30] p-10 rounded-3xl border border-gray-700 hover:bg-gray-750 transition">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center mb-6">
               <svg
                 className="w-7 h-7 text-white"
@@ -117,7 +117,7 @@ const Home: React.FC = () => {
       </section>
 
       {/* CTA Section */}
-      <section className="py-24 px-6 text-center bg-black">
+      <section className="py-24 px-6 text-center bg-[#1E1F23]">
         <div className="max-w-4xl mx-auto">
           <h2 className="text-4xl md:text-6xl font-extrabold mb-6 text-orange-500">
             지금 바로 시작하세요

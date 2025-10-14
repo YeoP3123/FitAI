@@ -2,7 +2,7 @@ import React from "react";
 
 const Footer: React.FC = () => {
   return (
-    <footer className="bg-[#1E1F23] text-gray-400 py-12 px-8">
+    <footer className="bg-[#1E1F23] text-gray-400 p-8">
       <div className="max-w-7xl mx-auto">
         {/* 상단 영역: 로고 + 링크 */}
         <div className="flex flex-col md:flex-row items-center justify-between mb-10">
