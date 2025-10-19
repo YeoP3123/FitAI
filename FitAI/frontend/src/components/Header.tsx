@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import LoginModal from "./LoginModal";
 import SignupModal from "./SignupModal";
+import { Link } from "react-router-dom";
 
 const Header: React.FC = () => {
   const [modal, setModal] = useState<"login" | "signup" | null>(null);
@@ -22,7 +23,7 @@ const Header: React.FC = () => {
         <nav className="hidden md:flex items-center space-x-10 text-sm font-medium">
           <a href="#" className="text-white hover:text-orange-500 transition">운동</a>
           <a href="#" className="text-white hover:text-orange-500 transition">자세교정</a>
-          <a href="#" className="text-white hover:text-orange-500 transition">커뮤니티</a>
+          <Link to="/community" className="text-white hover:text-orange-500 transition">커뮤니티</Link>
           <a href="#" className="text-white hover:text-orange-500 transition">내 기록</a>
         </nav>
 
