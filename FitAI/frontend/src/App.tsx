@@ -1,28 +1,22 @@
-import { useState } from 'react'
-import './styles/index.css'
-import Community from "./components/community";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import Header from "./components/Header";
+import Home from "./pages/Home";
+import Footer from "./components/Footer";
+import Community from "./pages/Community";
+import CommunityUserReview from "./components/CommunityUserPost";
 
 function App() {
-  const [count, setCount] = useState(0)
-  const [showCommunity, setCommunityOn] = useState(false); // 커뮤니티 표시 상태 관리
-
-  // 커뮤니티 컴포넌트가 표시되는 경우 해당 컴포넌트를 렌더링
-  if (showCommunity) {
-    return <Community />;
-  }
-
   return (
-    <div>
-      <button onClick={() => setCommunityOn(true)}>
-        커뮤니티 열기 버튼 (임시){" "}
-      </button>{" "}
-      <h1>FitAI 프로젝트</h1>
-      <p>피트니스 AI 교정 프로젝트에 오신 것을 환영합니다 🎉</p>
-      <button onClick={() => setCount((count) => count + 1)}>
-        클릭 횟수: {count}
-      </button>
-    </div>
-  )
+    <Router>
+      <Header />
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/community" element={<Community />} />
+        <Route path="/community/:postId" element={<CommunityUserReview />} />
+      </Routes>
+      <Footer />
+    </Router>
+  );
 }
 
-export default App
+export default App;
