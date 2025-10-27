@@ -14,7 +14,7 @@ const cognitoAuthConfig = {
     ? "http://localhost:5173/"
     : "https://main.dka06770r9jf2.amplifyapp.com/",
   response_type: "code",
-  scope: "email openid profile",
+  scope: "openid email profile aws.cognito.signin.user.admin",
   extraQueryParams: {
     lang: "ko",
   },
