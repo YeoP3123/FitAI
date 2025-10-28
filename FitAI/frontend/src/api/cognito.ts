@@ -12,7 +12,10 @@ const REGION = "ap-northeast-2";
 /** 로그인/로그아웃에 쓰던 clientId 그대로 */
 const CLIENT_ID = "4ms22p52tnirk6qric8oq420j1";
 
-const cip = new CognitoIdentityProviderClient({ region: REGION });
+const cip = new CognitoIdentityProviderClient({
+  region: REGION,
+  maxAttempts: 1, // ✅ SDK의 자동 재시도 완전히 해제
+});
 
 /**
  * 이름/이메일 등 사용자 속성 업데이트
