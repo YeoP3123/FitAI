@@ -34,23 +34,29 @@ const MyPage: React.FC = () => {
   const [resetNewPw, setResetNewPw] = useState("");
   const [showResetPw, setShowResetPw] = useState(false);
 
-  // ✅ 로그아웃
-  const handleLogout = async () => {
-    const clientId = "4ms22p52tnirk6qric8oq420j1";
-    const logoutUri =
-      window.location.hostname === "localhost"
-        ? "http://localhost:5173/"
-        : "https://main.dka06770r9jf2.amplifyapp.com/";
-    const cognitoDomain =
-      "https://ap-northeast-2mzuhxhxiv.auth.ap-northeast-2.amazoncognito.com";
+// ✅ 완전 로그아웃 (Cognito + OIDC 모두)
+const handleLogout = async () => {
+  const clientId = "4ms22p52tnirk6qric8oq420j1";
+  const logoutUri =
+    window.location.hostname === "localhost"
+      ? "http://localhost:5173/"
+      : "https://main.dka06770r9jf2.amplifyapp.com/";
+  const cognitoDomain =
+    "https://ap-northeast-2mzuhxhxiv.auth.ap-northeast-2.amazoncognito.com";
 
+  try {
+    // 1️⃣ 먼저 OIDC 세션 제거
     await auth.removeUser();
-    window.location.assign(
-      `${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${encodeURIComponent(
-        logoutUri
-      )}`
-    );
-  };
+
+    // 2️⃣ Cognito 세션 완전 종료
+    window.location.href = `${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${encodeURIComponent(
+      logoutUri
+    )}`;
+  } catch (error) {
+    console.error("❌ 로그아웃 중 오류:", error);
+  }
+};
+
 
   // ✅ 이메일 인증 처리
   const handleVerifyEmail = async () => {
