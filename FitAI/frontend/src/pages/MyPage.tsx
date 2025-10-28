@@ -15,41 +15,27 @@ function getFriendlyErrorMessage(error: any): string {
   const code = error?.code || error?.name || "";
   const msg = error?.message || error?.toString() || "";
 
-  // ✅ 비밀번호 관련 (LimitExceededException도 같은 메시지로 통합)
   if (code === "NotAuthorizedException" || code === "LimitExceededException")
     return "현재 비밀번호가 올바르지 않습니다. 다시 입력해주세요.";
-
-  // ✅ 이메일 / 인증 코드 관련
   if (code === "CodeMismatchException")
     return "입력하신 인증 코드가 올바르지 않습니다. 다시 확인해주세요.";
   if (code === "ExpiredCodeException")
     return "인증 코드가 만료되었습니다. 새 코드를 요청해주세요.";
-
-  // ✅ 사용자 계정 관련
-  if (code === "UserNotFoundException")
-    return "등록되지 않은 사용자입니다.";
+  if (code === "UserNotFoundException") return "등록되지 않은 사용자입니다.";
   if (code === "InvalidParameterException")
     return "입력값이 올바르지 않습니다. 다시 확인해주세요.";
   if (code === "TooManyRequestsException")
     return "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
   if (code === "NotAuthorizedException")
     return "권한이 없습니다. 다시 로그인해주세요.";
-
-  // ✅ Access Token 관련
   if (msg.includes("Access Token does not have required scopes"))
     return "세션이 만료되었습니다. 다시 로그인해주세요.";
-
-  // ✅ 비밀번호 입력 오류 (문자열 기반 보조 처리)
   if (msg.includes("Incorrect username or password"))
     return "비밀번호가 올바르지 않습니다.";
-
-  // ✅ 인증 코드 메시지 백업
   if (msg.includes("Invalid verification code"))
     return "입력하신 인증 코드가 잘못되었습니다. 다시 확인해주세요.";
   if (msg.includes("Invalid code provided"))
     return "인증 코드가 올바르지 않습니다. 새 코드를 요청해주세요.";
-
-  // ✅ 기타
   return "알 수 없는 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
 }
 
@@ -77,18 +63,31 @@ const MyPage: React.FC = () => {
   const [resetNewPw, setResetNewPw] = useState("");
 
   // ✅ 로그아웃
-  const handleLogout = () => {
-    auth.removeUser();
+const handleLogout = async () => {
+  try {
     const clientId = "4ms22p52tnirk6qric8oq420j1";
-    const logoutUri = isDev
-      ? "http://localhost:5173/"
-      : "https://main.dka06770r9jf2.amplifyapp.com/";
+    const logoutUri =
+      window.location.hostname === "localhost"
+        ? "http://localhost:5173/"
+        : "https://main.dka06770r9jf2.amplifyapp.com/";
     const cognitoDomain =
       "https://ap-northeast-2mzuhxhxiv.auth.ap-northeast-2.amazoncognito.com";
-    window.location.href = `${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${encodeURIComponent(
-      logoutUri
-    )}`;
-  };
+
+    // 1️⃣ OIDC localStorage 세션 제거
+    await auth.removeUser();
+
+    // 2️⃣ Cognito 세션 쿠키 제거 및 홈으로 리다이렉트
+    window.location.assign(
+      `${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${encodeURIComponent(
+        logoutUri
+      )}`
+    );
+  } catch (error) {
+    console.error("로그아웃 중 오류:", error);
+  }
+};
+
+
 
   /** 프로필 저장 */
   const onSaveProfile = async () => {
@@ -105,8 +104,8 @@ const MyPage: React.FC = () => {
       await updateUserAttributes(accessToken, attrs);
       Swal.fire("저장 완료", "변경사항이 저장되었습니다.", "success");
 
-      // ✅ 이름 변경 시 AuthStatus에서 바로 반영되도록 저장
-      if (attrs.name) localStorage.setItem("userName", attrs.name);
+      // ✅ Cognito에서 최신 프로필 재조회
+      await auth.signinSilent();
     } catch (e: any) {
       Swal.fire("오류", getFriendlyErrorMessage(e), "error");
     }
@@ -122,6 +121,7 @@ const MyPage: React.FC = () => {
     try {
       await verifyUserAttribute(accessToken, "email", emailCode);
       Swal.fire("인증 완료", "이메일 인증이 완료되었습니다.", "success");
+      await auth.signinSilent(); // ✅ 인증 후 프로필 새로고침
     } catch (e: any) {
       Swal.fire("오류", getFriendlyErrorMessage(e), "error");
     }
@@ -274,7 +274,6 @@ const MyPage: React.FC = () => {
             비밀번호 변경
           </button>
 
-          {/* 초기화 */}
           <div className="pt-4 border-t border-gray-700 space-y-3">
             <button
               onClick={onStartResetPassword}
