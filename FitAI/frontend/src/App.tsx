@@ -9,6 +9,9 @@ import ExerciseDetail from "./pages/ExerciseDetail";
 import MyProfile from "./pages/myProfile";
 import PostureCorrection from "./pages/PostureCorrection";
 
+import MyPage from "./pages/MyPage";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
 
 function App() {
   return (
@@ -22,6 +25,9 @@ function App() {
         <Route path="/community" element={<Community />} />
         <Route path="/community/:postId" element={<CommunityUserReview />} />
         <Route path="/profile" element={<MyProfile />} />
+        <Route path="/MyPage" element={<MyPage />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+        <Route path="/terms-of-service" element={<TermsOfService />} />
       </Routes>
       <Footer />
     </Router>
