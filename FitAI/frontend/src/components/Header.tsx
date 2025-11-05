@@ -12,6 +12,10 @@ const Header: React.FC = () => {
   const closeMenu = () => setMenuOpen(false);
 
   return (
+    <>
+      <header className="bg-[#1E1F23] h-18 flex items-center justify-between px-8">
+        {/* 왼쪽 로고 */}
+        <Link to="/" className="flex items-center space-x-3">
     <header className="bg-[#1E1F23] h-18 px-6 md:px-8 flex items-center justify-center relative z-50">
       {/* 1️⃣ 로고 (왼쪽 고정) */}
       <div className="absolute left-6 md:left-8 flex items-center space-x-3">
@@ -37,6 +41,21 @@ const Header: React.FC = () => {
           </div>
           <span className="text-xl font-bold text-white">FitAI</span>
         </Link>
+
+        {/* 가운데 메뉴 */}
+        <nav className="hidden md:flex items-center space-x-10 text-sm font-medium">
+          <Link to="/exercise" className="text-white hover:text-orange-500 transition">운동</Link>
+          <Link to="/posture" className="text-white hover:text-orange-500 transition">자세교정</Link>
+          <Link to="/community" className="text-white hover:text-orange-500 transition">커뮤니티</Link>
+          <Link to="/profile" className="text-white hover:text-orange-500 transition">내 기록</Link>        
+        </nav>
+
+        {/* 오른쪽 로그인 / 시작하기 */}
+        <div className="flex items-center space-x-4">
+          <button onClick={() => setModal("login")} className="text-white text-sm hover:text-orange-500 transition">
+            로그인
+          </button>
+          <button className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-full transition">
       </div>
 
       {/* 2️⃣ 메뉴 (가운데 - 큰 화면에서만 보임) */}
