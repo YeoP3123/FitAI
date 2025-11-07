@@ -41,7 +41,7 @@ const Header: React.FC = () => {
 
       {/* 2️⃣ 메뉴 (가운데 - 큰 화면에서만 보임) */}
       <nav className="hidden md:flex items-center space-x-10 text-sm font-medium">
-        <a href="#" className="text-white hover:text-orange-500 transition">
+        <a href="/exercise" className="text-white hover:text-orange-500 transition">
           운동
         </a>
         <a href="#" className="text-white hover:text-orange-500 transition">
