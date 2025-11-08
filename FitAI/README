@@ -1,3 +1,3 @@
 // SHIFT + ALT + F = 코드 자동 정렬 단축키
-
+// ctrl + shift + p -> Delete branch = 브랜치 삭제
 // py -3.13 -m uvicorn main:app --reload --port 8000
