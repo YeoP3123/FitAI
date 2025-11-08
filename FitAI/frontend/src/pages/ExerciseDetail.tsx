@@ -17,17 +17,54 @@ interface ExerciseWithSettings extends Exercise {
   restTime: number;
 }
 
+interface PoseAnalysis {
+  score: number;
+  shoulders: number;
+  hips: number;
+  spine: number;
+  elbows: number;
+  errorCodes: number[];
+  hints: string[];
+}
+
+// MediaPipe 포즈 분석을 위한 상수
+const THRESH_SHOULDERS_ERR = 0.08;
+const THRESH_HIPS_ERR = 0.10;
+const THRESH_SPINE_ANGLE = 30;
+const TARGET_ELBOW_DEG = 160;
+const WIDTH_ELBOW_SIGM = 35;
+const MIN_ELBOW_SCORE = 6;
+const TARGET_KNEE_DEG = 175;
+const ALLOW_KNEE_DEVI = 20;
+
 function ExerciseDetail() {
   const location = useLocation();
   const navigate = useNavigate();
   const selectedExercises = location.state?.selectedExercises as ExerciseWithSettings[] || [];
   
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState<string>("");
   
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [completedExercises, setCompletedExercises] = useState<string[]>([]);
+  
+  // 포즈 분석 상태
+  const [poseAnalysis, setPoseAnalysis] = useState<PoseAnalysis>({
+    score: 0,
+    shoulders: 0,
+    hips: 0,
+    spine: 0,
+    elbows: 0,
+    errorCodes: [],
+    hints: []
+  });
+  
+  const [isPoseDetecting, setIsPoseDetecting] = useState(false);
+  const landmarkerRef = useRef<any>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   // Toast 알림
   const [toast, setToast] = useState<{
@@ -40,11 +77,9 @@ function ExerciseDetail() {
     type: "success",
   });
 
-  // 현재 운동과 다음 운동
   const currentExercise = selectedExercises[currentExerciseIndex];
   const nextExercise = selectedExercises[currentExerciseIndex + 1];
 
-  // 타입별 한글 이름 매핑
   const typeNameMap: Record<string, string> = {
     upper_body: "상체",
     lower_body: "하체",
@@ -53,15 +88,13 @@ function ExerciseDetail() {
     full_body: "전신"
   };
 
-  // Toast 표시 함수
   const showToast = (message: string, type: "success" | "info" | "warning" = "success") => {
     setToast({ show: true, message, type });
     setTimeout(() => {
       setToast({ show: false, message: "", type: "success" });
-    }, 3000); // 3초 후 자동 사라짐
+    }, 3000);
   };
 
-  // 선택된 운동이 없으면 목록으로 이동
   useEffect(() => {
     if (selectedExercises.length === 0) {
       showToast("선택된 운동이 없습니다.", "warning");
@@ -69,7 +102,285 @@ function ExerciseDetail() {
     }
   }, [selectedExercises, navigate]);
 
-  // 웹캠 시작
+  // MediaPipe 초기화
+  const initMediaPipe = async () => {
+    try {
+      // @ts-ignore
+      const { FilesetResolver, PoseLandmarker } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.13/vision_bundle.mjs');
+      
+      const fileset = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.13/wasm"
+      );
+      
+      const landmarker = await PoseLandmarker.createFromOptions(fileset, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
+        },
+        runningMode: "VIDEO",
+        numPoses: 1
+      });
+      
+      landmarkerRef.current = landmarker;
+      setIsPoseDetecting(true);
+      showToast("AI 포즈 분석 준비 완료", "success");
+    } catch (error) {
+      console.error("MediaPipe 초기화 실패:", error);
+      showToast("AI 분석 초기화 실패", "warning");
+    }
+  };
+
+  // 포즈 분석 로직
+  const analyzePose = (landmarks: any[]) => {
+    if (!landmarks || landmarks.length === 0) return null;
+
+    const lm = landmarks[0];
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+
+    const W = canvas.clientWidth;
+    const H = canvas.clientHeight;
+
+    const getLandmark = (i: number) => {
+      const p = lm[i];
+      return { x: p.x * W, y: p.y * H, v: p.visibility ?? 1 };
+    };
+
+    const LS = getLandmark(11), RS = getLandmark(12);
+    const LE = getLandmark(13), RE = getLandmark(14);
+    const LW = getLandmark(15), RW = getLandmark(16);
+    const LH = getLandmark(23), RH = getLandmark(24);
+    const LK = getLandmark(25), RK = getLandmark(26);
+    const LA = getLandmark(27), RA = getLandmark(28);
+
+    const midSh = { x: (LS.x + RS.x) / 2, y: (LS.y + RS.y) / 2 };
+    const midHp = { x: (LH.x + RH.x) / 2, y: (LH.y + RH.y) / 2 };
+
+    const len2 = (ax: number, ay: number, bx: number, by: number) => {
+      return Math.hypot(ax - bx, ay - by);
+    };
+
+    const angleDeg = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) => {
+      const bax = ax - bx, bay = ay - by;
+      const bcx = cx - bx, bcy = cy - by;
+      const na = Math.hypot(bax, bay), nb = Math.hypot(bcx, bcy);
+      if (!na || !nb) return null;
+      let cos = (bax * bcx + bay * bcy) / (na * nb);
+      cos = Math.max(-1, Math.min(1, cos));
+      return Math.acos(cos) * 180 / Math.PI;
+    };
+
+    const shoulderW = len2(LS.x, LS.y, RS.x, RS.y);
+    const torso = len2(midSh.x, midSh.y, midHp.x, midHp.y);
+    const scale = Math.max(1e-6, 0.5 * (shoulderW + torso));
+
+    const shouldersErr = Math.abs(LS.y - RS.y) / scale;
+    const hipsErr = Math.abs(LH.y - RH.y) / scale;
+
+    const huberLike = (err: number, delta: number) => {
+      const a = Math.abs(err);
+      return a <= delta ? 1 - a / (2 * delta) : Math.max(0, 0.5 * (delta / a));
+    };
+
+    const shScore = 25 * huberLike(shouldersErr, THRESH_SHOULDERS_ERR);
+    const hpScore = 25 * huberLike(hipsErr, THRESH_HIPS_ERR) * (20 / 25);
+
+    const v = { x: midSh.x - midHp.x, y: midSh.y - midHp.y };
+    const angVert = Math.abs(Math.atan2(Math.abs(v.x), Math.abs(v.y)) * 180 / Math.PI);
+    const spScore = 25 * huberLike(angVert, THRESH_SPINE_ANGLE);
+
+    const L_ang = angleDeg(LS.x, LS.y, LE.x, LE.y, LW.x, LW.y);
+    const R_ang = angleDeg(RS.x, RS.y, RE.x, RE.y, RW.x, RW.y);
+
+    const sigmoidScore = (x: number, center: number, width: number, maxScore: number) => {
+      const s = 1 / (1 + Math.exp(Math.abs(x - center) / Math.max(1e-6, width)));
+      return maxScore * s;
+    };
+
+    const L_el = L_ang ? sigmoidScore(L_ang, TARGET_ELBOW_DEG, WIDTH_ELBOW_SIGM, 15) : 0;
+    const R_el = R_ang ? sigmoidScore(R_ang, TARGET_ELBOW_DEG, WIDTH_ELBOW_SIGM, 15) : 0;
+    const elScore = L_el + R_el;
+
+    const L_knee = angleDeg(LH.x, LH.y, LK.x, LK.y, LA.x, LA.y);
+    const R_knee = angleDeg(RH.x, RH.y, RK.x, RK.y, RA.x, RA.y);
+    const L_knee_bad = L_knee != null && Math.abs(L_knee - TARGET_KNEE_DEG) > ALLOW_KNEE_DEVI;
+    const R_knee_bad = R_knee != null && Math.abs(R_knee - TARGET_KNEE_DEG) > ALLOW_KNEE_DEVI;
+
+    const leftArmBad = L_el < MIN_ELBOW_SCORE;
+    const rightArmBad = R_el < MIN_ELBOW_SCORE;
+
+    const total = Math.min(100, Math.max(0, shScore + hpScore + spScore + elScore));
+
+    const errorCodes: number[] = [];
+    const hints: string[] = [];
+
+    if (leftArmBad) {
+      errorCodes.push(1);
+      hints.push("왼팔 팔꿈치 각도 교정 필요");
+    }
+    if (rightArmBad) {
+      errorCodes.push(2);
+      hints.push("오른팔 팔꿈치 각도 교정 필요");
+    }
+    if (L_knee_bad) {
+      errorCodes.push(3);
+      hints.push("왼쪽 무릎 각도 교정 필요");
+    }
+    if (R_knee_bad) {
+      errorCodes.push(4);
+      hints.push("오른쪽 무릎 각도 교정 필요");
+    }
+
+    return {
+      score: Math.round(total),
+      shoulders: Math.round(shScore),
+      hips: Math.round(hpScore),
+      spine: Math.round(spScore),
+      elbows: Math.round(elScore),
+      errorCodes,
+      hints,
+      landmarks: lm,
+      shoulderBad: shouldersErr > THRESH_SHOULDERS_ERR * 1.2,
+      hipBad: hipsErr > THRESH_HIPS_ERR * 1.2,
+      spineBad: angVert > THRESH_SPINE_ANGLE * 1.2,
+      leftArmBad,
+      rightArmBad,
+      leftLegBad: L_knee_bad,
+      rightLegBad: R_knee_bad,
+      points: { LS, RS, LE, RE, LW, RW, LH, RH, LK, RK, LA, RA, midSh, midHp }
+    };
+  };
+
+  // 캔버스에 포즈 그리기
+  const drawPose = (analysis: any) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // 캔버스 크기 조정
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    ctx.clearRect(0, 0, rect.width, rect.height);
+
+    if (!analysis || !analysis.landmarks) return;
+
+    const { landmarks, points, leftArmBad, rightArmBad, leftLegBad, rightLegBad, shoulderBad, hipBad, spineBad } = analysis;
+
+    // 기본 스켈레톤
+    const connections = [
+      [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+      [11, 23], [12, 24], [23, 24], [23, 25], [25, 27],
+      [24, 26], [26, 28]
+    ];
+
+    ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = 2;
+
+    connections.forEach(([a, b]) => {
+      const pa = landmarks[a];
+      const pb = landmarks[b];
+      ctx.beginPath();
+      ctx.moveTo(pa.x * rect.width, pa.y * rect.height);
+      ctx.lineTo(pb.x * rect.width, pb.y * rect.height);
+      ctx.stroke();
+    });
+
+    // 관절점
+    ctx.fillStyle = '#ffffff';
+    landmarks.forEach((p: any) => {
+      ctx.beginPath();
+      ctx.arc(p.x * rect.width, p.y * rect.height, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // 오류 강조
+    ctx.strokeStyle = '#ff3333';
+    ctx.lineWidth = 6;
+    ctx.shadowColor = '#ff3333';
+    ctx.shadowBlur = 10;
+
+    const drawErrorLine = (p1: any, p2: any) => {
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    };
+
+    if (shoulderBad) drawErrorLine(points.LS, points.RS);
+    if (hipBad) drawErrorLine(points.LH, points.RH);
+    if (spineBad) drawErrorLine(points.midSh, points.midHp);
+    if (leftArmBad) {
+      drawErrorLine(points.LS, points.LE);
+      drawErrorLine(points.LE, points.LW);
+    }
+    if (rightArmBad) {
+      drawErrorLine(points.RS, points.RE);
+      drawErrorLine(points.RE, points.RW);
+    }
+    if (leftLegBad) {
+      drawErrorLine(points.LH, points.LK);
+      drawErrorLine(points.LK, points.LA);
+    }
+    if (rightLegBad) {
+      drawErrorLine(points.RH, points.RK);
+      drawErrorLine(points.RK, points.RA);
+    }
+
+    ctx.shadowBlur = 0;
+  };
+
+  // 포즈 검출 루프
+  const detectPose = () => {
+    if (!landmarkerRef.current || !videoRef.current || !isCameraOn) return;
+
+    const video = videoRef.current;
+    const now = performance.now();
+
+    if (video.currentTime !== video.currentTime) {
+      return;
+    }
+
+    try {
+      const result = landmarkerRef.current.detectForVideo(video, now);
+      
+      if (result && result.landmarks && result.landmarks.length > 0) {
+        const analysis = analyzePose(result.landmarks);
+        if (analysis) {
+          setPoseAnalysis({
+            score: analysis.score,
+            shoulders: analysis.shoulders,
+            hips: analysis.hips,
+            spine: analysis.spine,
+            elbows: analysis.elbows,
+            errorCodes: analysis.errorCodes,
+            hints: analysis.hints
+          });
+          drawPose(analysis);
+        }
+      } else {
+        setPoseAnalysis({
+          score: 0,
+          shoulders: 0,
+          hips: 0,
+          spine: 0,
+          elbows: 0,
+          errorCodes: [],
+          hints: []
+        });
+      }
+    } catch (error) {
+      console.error("포즈 검출 오류:", error);
+    }
+
+    rafIdRef.current = requestAnimationFrame(detectPose);
+  };
+
+  // 카메라 시작
   const startCamera = async () => {
     try {
       setCameraError("");
@@ -83,16 +394,22 @@ function ExerciseDetail() {
         audio: false,
       });
       
+      streamRef.current = stream;
+      
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        await videoRef.current.play();
         setIsCameraOn(true);
+        showToast("카메라가 시작되었습니다", "success");
         
-        try {
-          await videoRef.current.play();
-          showToast("카메라가 시작되었습니다", "success");
-        } catch (playError) {
-          console.error("❌ 비디오 재생 실패:", playError);
+        // MediaPipe 초기화 및 포즈 검출 시작
+        if (!landmarkerRef.current) {
+          await initMediaPipe();
         }
+        
+        setTimeout(() => {
+          detectPose();
+        }, 500);
       }
     } catch (error: any) {
       let errorMessage = "카메라에 접근할 수 없습니다.";
@@ -110,42 +427,54 @@ function ExerciseDetail() {
     }
   };
 
-  // 웹캠 중지
+  // 카메라 중지
   const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((track) => {
-        track.stop();
-      });
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+
+    if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
     
     setIsCameraOn(false);
+    setIsPoseDetecting(false);
     setCameraError("");
+    
+    setPoseAnalysis({
+      score: 0,
+      shoulders: 0,
+      hips: 0,
+      spine: 0,
+      elbows: 0,
+      errorCodes: [],
+      hints: []
+    });
   };
 
-  // 컴포넌트 언마운트 시 카메라 정리
   useEffect(() => {
     return () => {
       stopCamera();
     };
   }, []);
 
-  // 현재 운동 완료
   const handleCompleteCurrentExercise = () => {
     if (!currentExercise) return;
 
-    // 완료 목록에 추가
     setCompletedExercises(prev => [...prev, currentExercise.exercise_id]);
 
-    // 다음 운동으로 이동
     if (currentExerciseIndex < selectedExercises.length - 1) {
       showToast(`✅ ${currentExercise.exercise_name} 완료! 다음: ${nextExercise?.exercise_name}`, "success");
       setTimeout(() => {
         setCurrentExerciseIndex(prev => prev + 1);
       }, 500);
     } else {
-      // 모든 운동 완료
       showToast(`🎉 모든 운동 완료! 총 ${selectedExercises.length}개 완료`, "success");
       stopCamera();
       setTimeout(() => {
@@ -154,7 +483,6 @@ function ExerciseDetail() {
     }
   };
 
-  // 이전 운동으로 이동
   const handlePreviousExercise = () => {
     if (currentExerciseIndex > 0) {
       setCurrentExerciseIndex(prev => prev - 1);
@@ -162,7 +490,6 @@ function ExerciseDetail() {
     }
   };
 
-  // 운동 종료
   const handleFinishWorkout = () => {
     if (completedExercises.length < selectedExercises.length) {
       const confirmed = confirm("아직 완료하지 않은 운동이 있습니다. 종료하시겠습니까?");
@@ -195,210 +522,129 @@ function ExerciseDetail() {
 
   return (
     <div className="bg-[#1E1F23] text-white min-h-screen">
-      {/* Toast 알림 */}
       {toast.show && (
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] animate-slide-down">
           <div className={`rounded-xl px-6 py-4 shadow-2xl backdrop-blur-sm flex items-center gap-3 ${
             toast.type === "success" 
               ? "bg-green-500/90 text-white" 
-              : toast.type === "warning"
-              ? "bg-yellow-500/90 text-white"
-              : "bg-blue-500/90 text-white"
+              : toast.type === "info"
+              ? "bg-blue-500/90 text-white"
+              : "bg-orange-500/90 text-white"
           }`}>
-            {toast.type === "success" && (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-              </svg>
-            )}
-            {toast.type === "warning" && (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-            )}
-            {toast.type === "info" && (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            )}
-            <p className="font-semibold text-lg">{toast.message}</p>
+            <span className="text-xl">
+              {toast.type === "success" ? "✓" : toast.type === "info" ? "ℹ" : "⚠"}
+            </span>
+            <span className="font-medium">{toast.message}</span>
           </div>
         </div>
       )}
 
-      {/* 헤더 */}
-      <header className="bg-[#2A2B30] border-b border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16 gap-4">
-            {/* 왼쪽: FITAI 로고 + 진행 상황 */}
-            <div className="flex items-center gap-4 flex-shrink-0">
-              <div className="bg-white text-black px-3 py-1 rounded-md font-bold text-sm">
-                FITAI
-              </div>
-              <span className="text-gray-400 text-sm font-semibold">
-                {currentExerciseIndex + 1} / {selectedExercises.length}
-              </span>
-            </div>
-
-            {/* 중앙: 운동 목록 */}
-            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide flex-1">
-              {selectedExercises.map((exercise, index) => {
-                const isCompleted = completedExercises.includes(exercise.exercise_id);
-                const isCurrent = index === currentExerciseIndex;
-
-                return (
-                  <div key={exercise.exercise_id} className="flex items-center gap-2 flex-shrink-0">
-                    <div
-                      className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${
-                        isCurrent
-                          ? 'bg-orange-500 text-white shadow-lg'
-                          : isCompleted
-                          ? 'bg-green-500/20 text-green-400 line-through'
-                          : 'bg-transparent text-gray-500'
-                      }`}
-                    >
-                      {exercise.exercise_name}
-                    </div>
-                    
-                    {/* 화살표 */}
-                    {index < selectedExercises.length - 1 && (
-                      <svg 
-                        className={`w-4 h-4 flex-shrink-0 ${
-                          index < currentExerciseIndex ? 'text-green-500' : 'text-gray-600'
-                        }`}
-                        fill="none" 
-                        stroke="currentColor" 
-                        viewBox="0 0 24 24"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                      </svg>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* 오른쪽: 종료 버튼 */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-3xl font-bold">운동 진행 중</h1>
+          <div className="flex items-center gap-4">
+            <span className="text-gray-400">
+              {currentExerciseIndex + 1} / {selectedExercises.length}
+            </span>
             <button
               onClick={handleFinishWorkout}
-              className="text-red-400 hover:text-red-300 transition flex items-center gap-2 flex-shrink-0"
+              className="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-lg font-semibold transition"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-              <span className="hidden sm:inline">종료</span>
+              운동 종료
             </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* 진행 상황 바 */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-400">전체 진행률</p>
-            <p className="text-sm font-bold text-orange-500">
-              {Math.round((completedExercises.length / selectedExercises.length) * 100)}%
-            </p>
-          </div>
-          <div className="w-full bg-gray-700 rounded-full h-2 overflow-hidden">
-            <div 
-              className="bg-gradient-to-r from-orange-500 to-red-500 h-full transition-all duration-500"
-              style={{ width: `${(completedExercises.length / selectedExercises.length) * 100}%` }}
-            ></div>
           </div>
         </div>
 
         {/* 웹캠 영역 */}
-        <div className="mb-8">
-          <div className="relative w-full bg-black rounded-xl overflow-hidden" style={{ paddingTop: '56.25%' }}>
-            {/* 비디오 */}
+        <div className="mb-6">
+          <div className="relative bg-black rounded-xl overflow-hidden" style={{ aspectRatio: '16/9' }}>
             <video
               ref={videoRef}
               autoPlay
               playsInline
               muted
-              className="absolute inset-0 w-full h-full object-cover"
-              style={{ 
-                transform: 'scaleX(-1)',
-                display: isCameraOn ? 'block' : 'none'
-              }}
+              className="w-full h-full object-cover"
             />
-            
-            {/* 카메라 OFF 상태 */}
+            <canvas
+              ref={canvasRef}
+              className="absolute top-0 left-0 w-full h-full"
+            />
+
             {!isCameraOn && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400 bg-gradient-to-br from-gray-800 to-gray-900">
-                <svg className="w-20 h-20 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                <p className="text-lg mb-1">운동 자세 분석 준비</p>
-                <p className="text-sm text-gray-500 mb-4">카메라를 통해 실시간으로 자세를 분석합니다</p>
-                <p className="text-2xl font-bold text-white mb-2">{currentExercise.exercise_name}</p>
-                {cameraError && (
-                  <p className="text-sm text-red-500 mt-4 max-w-md text-center px-4">
-                    {cameraError}
-                  </p>
-                )}
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm">
+                <div className="text-center">
+                  <div className="text-6xl mb-4">📹</div>
+                  <p className="text-xl font-semibold mb-2">카메라를 시작해주세요</p>
+                  {cameraError && (
+                    <p className="text-red-400 text-sm">{cameraError}</p>
+                  )}
+                </div>
               </div>
             )}
-            
-            {/* 카메라 ON 상태 오버레이 */}
-            {isCameraOn && (
-              <div className="absolute inset-0 pointer-events-none">
-                {/* 상단 중앙: 현재 운동 -> 다음 운동 */}
-                <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full shadow-2xl">
-                  <div className="flex items-center gap-3">
-                    <div className="text-center">
-                      <p className="text-xs text-gray-400 mb-1">현재 운동</p>
-                      <p className="text-xl font-bold text-orange-500">{currentExercise.exercise_name}</p>
-                    </div>
-                    
-                    {nextExercise && (
-                      <>
-                        <svg className="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                        </svg>
-                        
-                        <div className="text-center">
-                          <p className="text-xs text-gray-400 mb-1">다음 운동</p>
-                          <p className="text-lg font-semibold text-gray-300">{nextExercise.exercise_name}</p>
-                        </div>
-                      </>
-                    )}
-                    
-                    {!nextExercise && (
-                      <>
-                        <svg className="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                        </svg>
-                        <div className="text-center">
-                          <p className="text-xs text-gray-400 mb-1">다음</p>
-                          <p className="text-lg font-semibold text-green-400">마지막 운동!</p>
-                        </div>
-                      </>
-                    )}
+
+            {isCameraOn && isPoseDetecting && (
+              <>
+                {/* AI 분석 HUD */}
+                <div className="absolute left-4 top-4 bg-black/70 backdrop-blur-md rounded-xl p-4 text-sm space-y-2 min-w-[250px]">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-bold text-lg">AI 자세 분석</span>
+                    <span className="text-2xl font-bold text-green-400">{poseAnalysis.score}</span>
                   </div>
+                  
+                  <div className="space-y-1 text-xs">
+                    <div className="flex justify-between">
+                      <span>어깨 수평:</span>
+                      <span className="text-green-400 font-semibold">{poseAnalysis.shoulders}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>골반 수평:</span>
+                      <span className="text-green-400 font-semibold">{poseAnalysis.hips}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>척추 수직:</span>
+                      <span className="text-green-400 font-semibold">{poseAnalysis.spine}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>팔꿈치 각도:</span>
+                      <span className="text-green-400 font-semibold">{poseAnalysis.elbows}</span>
+                    </div>
+                  </div>
+
+                  {poseAnalysis.errorCodes.length > 0 && (
+                    <>
+                      <hr className="border-gray-600 my-2" />
+                      <div>
+                        <div className="font-semibold text-red-400 mb-1">
+                          오류 부위: [{poseAnalysis.errorCodes.join(', ')}]
+                        </div>
+                        <div className="text-xs text-gray-400">
+                          1=왼팔, 2=오른팔, 3=왼다리, 4=오른다리
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {poseAnalysis.hints.length > 0 && (
+                    <>
+                      <hr className="border-gray-600 my-2" />
+                      <div>
+                        <div className="font-semibold mb-1">교정 안내</div>
+                        <ul className="space-y-1">
+                          {poseAnalysis.hints.map((hint, i) => (
+                            <li key={i} className="text-yellow-400 text-xs">• {hint}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* AI 분석 중 표시 */}
-                <div className="absolute top-20 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-full text-sm font-medium shadow-lg flex items-center gap-2">
+                <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-full text-sm font-medium shadow-lg flex items-center gap-2">
                   <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
                   AI 자세 분석 중
                 </div>
-
-                {/* 4개의 마커 */}
-                <div className="absolute top-4 left-4 w-8 h-8 bg-red-500 rounded-full flex items-center justify-center shadow-lg">
-                  <span className="text-white text-xs font-bold">1</span>
-                </div>
-                <div className="absolute bottom-4 left-4 w-8 h-8 bg-red-500 rounded-full flex items-center justify-center shadow-lg">
-                  <span className="text-white text-xs font-bold">2</span>
-                </div>
-                <div className="absolute top-4 right-4 w-8 h-8 bg-red-500 rounded-full flex items-center justify-center shadow-lg">
-                  <span className="text-white text-xs font-bold">3</span>
-                </div>
-                <div className="absolute bottom-4 right-4 w-8 h-8 bg-red-500 rounded-full flex items-center justify-center shadow-lg">
-                  <span className="text-white text-xs font-bold">4</span>
-                </div>
-              </div>
+              </>
             )}
           </div>
 
@@ -431,9 +677,7 @@ function ExerciseDetail() {
 
         {/* 운동 정보 및 컨트롤 */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 왼쪽: 운동 정보 */}
           <div className="lg:col-span-2 space-y-6">
-            {/* 현재 운동 정보 */}
             <div className="bg-[#2A2B30] rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-2xl font-bold">{currentExercise.exercise_name}</h2>
@@ -442,7 +686,6 @@ function ExerciseDetail() {
                 </span>
               </div>
               
-              {/* 세트/횟수/휴식 정보 */}
               <div className="flex gap-4 mb-6">
                 <div className="flex-1 bg-[#3A3B40] rounded-lg p-4 text-center">
                   <p className="text-2xl font-bold text-orange-500">{currentExercise.sets}</p>
@@ -480,7 +723,6 @@ function ExerciseDetail() {
               </div>
             </div>
 
-            {/* 운동 컨트롤 버튼 */}
             <div className="flex gap-3">
               <button
                 onClick={handlePreviousExercise}
@@ -503,7 +745,6 @@ function ExerciseDetail() {
             </div>
           </div>
 
-          {/* 오른쪽: 운동 목록 */}
           <div className="bg-[#2A2B30] rounded-xl p-6">
             <h3 className="text-lg font-bold mb-4">운동 목록</h3>
             <div className="space-y-3">
@@ -552,15 +793,7 @@ function ExerciseDetail() {
         </div>
       </div>
 
-      {/* CSS 추가 */}
       <style>{`
-        .scrollbar-hide::-webkit-scrollbar {
-          display: none;
-        }
-        .scrollbar-hide {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
         @keyframes slide-down {
           from {
             opacity: 0;
