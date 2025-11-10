@@ -17,6 +17,13 @@ interface ExerciseWithSettings extends Exercise {
   restTime: number;
 }
 
+interface Landmark {
+  x: number;
+  y: number;
+  z: number;
+  visibility: number;
+}
+
 interface PoseAnalysis {
   score: number;
   shoulders: number;
@@ -27,6 +34,21 @@ interface PoseAnalysis {
   hints: string[];
 }
 
+interface PoseResult {
+  success: boolean;
+  landmarks?: Landmark[];
+  analysis?: PoseAnalysis;
+}
+
+interface ExerciseScore {
+  exercise_id: string;
+  exercise_name: string;
+  scores: number[];
+  shouldersScores: number[];
+  hipsScores: number[];
+  spineScores: number[];
+  elbowsScores: number[];
+}
 // MediaPipe 포즈 분석을 위한 상수
 const THRESH_SHOULDERS_ERR = 0.08;
 const THRESH_HIPS_ERR = 0.10;
@@ -40,7 +62,7 @@ const ALLOW_KNEE_DEVI = 20;
 function ExerciseDetail() {
   const location = useLocation();
   const navigate = useNavigate();
-  const selectedExercises = location.state?.selectedExercises as ExerciseWithSettings[] || [];
+  const selectedExercises = (location.state?.selectedExercises as ExerciseWithSettings[]) || [];
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -66,6 +88,14 @@ function ExerciseDetail() {
   const rafIdRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // 포즈 분석 상태
+  const [poseAnalysis, setPoseAnalysis] = useState<PoseAnalysis | null>(null);
+  const [landmarks, setLandmarks] = useState<Landmark[] | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
+  // 📊 점수 기록
+  const [exerciseScores, setExerciseScores] = useState<ExerciseScore[]>([]);
+  
   // Toast 알림
   const [toast, setToast] = useState<{
     show: boolean;
@@ -102,6 +132,22 @@ function ExerciseDetail() {
     }
   }, [selectedExercises, navigate]);
 
+  // 스켈레톤 연결선 정의 (MediaPipe Pose 기준)
+  const POSE_CONNECTIONS = [
+    [11, 12], // 어깨
+    [11, 13], [13, 15], // 왼팔
+    [12, 14], [14, 16], // 오른팔
+    [11, 23], [12, 24], // 몸통
+    [23, 24], // 골반
+    [23, 25], [25, 27], // 왼다리
+    [24, 26], [26, 28], // 오른다리
+  ];
+
+  // 스켈레톤 그리기
+  const drawSkeleton = (landmarks: Landmark[], errorCodes: number[]) => {
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
   // MediaPipe 초기화
   const initMediaPipe = async () => {
     try {
@@ -258,6 +304,83 @@ function ExerciseDetail() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const hasLeftArmError = errorCodes.includes(1);
+    const hasRightArmError = errorCodes.includes(2);
+    const hasLeftLegError = errorCodes.includes(3);
+    const hasRightLegError = errorCodes.includes(4);
+
+    ctx.lineWidth = 3;
+    POSE_CONNECTIONS.forEach(([startIdx, endIdx]) => {
+      const start = landmarks[startIdx];
+      const end = landmarks[endIdx];
+
+      if (start.visibility > 0.5 && end.visibility > 0.5) {
+        const startX = start.x * canvas.width;
+        const startY = start.y * canvas.height;
+        const endX = end.x * canvas.width;
+        const endY = end.y * canvas.height;
+
+        let color = '#00ff88';
+
+        if ((startIdx === 11 && endIdx === 13) || (startIdx === 13 && endIdx === 15)) {
+          if (hasLeftArmError) color = '#ff3333';
+        }
+        else if ((startIdx === 12 && endIdx === 14) || (startIdx === 14 && endIdx === 16)) {
+          if (hasRightArmError) color = '#ff3333';
+        }
+        else if ((startIdx === 23 && endIdx === 25) || (startIdx === 25 && endIdx === 27)) {
+          if (hasLeftLegError) color = '#ff3333';
+        }
+        else if ((startIdx === 24 && endIdx === 26) || (startIdx === 26 && endIdx === 28)) {
+          if (hasRightLegError) color = '#ff3333';
+        }
+
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+      }
+    });
+
+    landmarks.forEach((landmark, index) => {
+      if (landmark.visibility > 0.5) {
+        const x = landmark.x * canvas.width;
+        const y = landmark.y * canvas.height;
+
+        let color = '#ffffff';
+        let radius = 4;
+
+        if (index === 13 && hasLeftArmError) {
+          color = '#ff3333';
+          radius = 6;
+        } else if (index === 14 && hasRightArmError) {
+          color = '#ff3333';
+          radius = 6;
+        }
+        else if (index === 25 && hasLeftLegError) {
+          color = '#ff3333';
+          radius = 6;
+        } else if (index === 26 && hasRightLegError) {
+          color = '#ff3333';
+          radius = 6;
+        }
+
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    });
+  };
+
+  // 백엔드로 프레임 전송 및 포즈 분석
+  const analyzePoseFrame = async () => {
+    if (!videoRef.current || !canvasRef.current || !isCameraOn || isAnalyzing) {
     // 캔버스 크기 조정
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
@@ -346,6 +469,102 @@ function ExerciseDetail() {
     }
 
     try {
+      setIsAnalyzing(true);
+      
+      const video = videoRef.current;
+      
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = video.videoWidth;
+      tempCanvas.height = video.videoHeight;
+      const tempCtx = tempCanvas.getContext('2d');
+      
+      if (!tempCtx) return;
+      
+      tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+      const imageData = tempCanvas.toDataURL('image/jpeg', 0.8);
+      
+      const response = await fetch('http://localhost:8000/api/analyze-pose', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ image: imageData }),
+      });
+      
+      const result: PoseResult = await response.json();
+      
+      if (result.success && result.landmarks && result.analysis) {
+        setLandmarks(result.landmarks);
+        setPoseAnalysis(result.analysis);
+        
+        // 📊 점수 기록
+        recordScore(result.analysis);
+        
+        drawSkeleton(result.landmarks, result.analysis.errorCodes);
+      } else {
+        setLandmarks(null);
+        setPoseAnalysis(null);
+        
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext('2d');
+        if (ctx && canvas) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+      }
+      
+    } catch (error) {
+      console.error('포즈 분석 오류:', error);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // 📊 점수 기록 함수
+  const recordScore = (analysis: PoseAnalysis) => {
+    if (!currentExercise) return;
+
+    setExerciseScores(prev => {
+      const existingIndex = prev.findIndex(
+        item => item.exercise_id === currentExercise.exercise_id
+      );
+
+      if (existingIndex >= 0) {
+        // 기존 운동에 점수 추가
+        const updated = [...prev];
+        updated[existingIndex].scores.push(analysis.score);
+        updated[existingIndex].shouldersScores.push(analysis.shoulders);
+        updated[existingIndex].hipsScores.push(analysis.hips);
+        updated[existingIndex].spineScores.push(analysis.spine);
+        updated[existingIndex].elbowsScores.push(analysis.elbows);
+        return updated;
+      } else {
+        // 새 운동 추가
+        return [
+          ...prev,
+          {
+            exercise_id: currentExercise.exercise_id,
+            exercise_name: currentExercise.exercise_name,
+            scores: [analysis.score],
+            shouldersScores: [analysis.shoulders],
+            hipsScores: [analysis.hips],
+            spineScores: [analysis.spine],
+            elbowsScores: [analysis.elbows],
+          },
+        ];
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (!isCameraOn) return;
+    
+    const interval = setInterval(() => {
+      analyzePoseFrame();
+    }, 200);
+    
+    return () => clearInterval(interval);
+  }, [isCameraOn, isAnalyzing]);
+
       const result = landmarkerRef.current.detectForVideo(video, now);
       
       if (result && result.landmarks && result.landmarks.length > 0) {
@@ -443,9 +662,17 @@ function ExerciseDetail() {
       videoRef.current.srcObject = null;
     }
     
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (ctx && canvas) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    
     setIsCameraOn(false);
     setIsPoseDetecting(false);
     setCameraError("");
+    setPoseAnalysis(null);
+    setLandmarks(null);
     
     setPoseAnalysis({
       score: 0,
@@ -475,11 +702,18 @@ function ExerciseDetail() {
         setCurrentExerciseIndex(prev => prev + 1);
       }, 500);
     } else {
+      // 📊 모든 운동 완료 → 결과 페이지로 이동
+      showToast(`🎉 모든 운동 완료! 결과를 확인하세요`, "success");
       showToast(`🎉 모든 운동 완료! 총 ${selectedExercises.length}개 완료`, "success");
       stopCamera();
       setTimeout(() => {
-        navigate('/exercise');
-      }, 2000);
+        navigate('/exercise-result', {
+          state: {
+            exerciseScores,
+            selectedExercises
+          }
+        });
+      }, 1500);
     }
   };
 
@@ -497,10 +731,21 @@ function ExerciseDetail() {
     }
 
     stopCamera();
-    showToast(`운동 종료! ${completedExercises.length}/${selectedExercises.length}개 완료`, "success");
-    setTimeout(() => {
-      navigate('/exercise');
-    }, 1500);
+    
+    // 📊 결과 페이지로 이동
+    if (exerciseScores.length > 0) {
+      navigate('/exercise-result', {
+        state: {
+          exerciseScores,
+          selectedExercises
+        }
+      });
+    } else {
+      showToast(`운동 종료!`, "success");
+      setTimeout(() => {
+        navigate('/exercise');
+      }, 1500);
+    }
   };
 
   if (!currentExercise) {
@@ -539,6 +784,53 @@ function ExerciseDetail() {
         </div>
       )}
 
+      {/* 헤더 */}
+      <header className="bg-[#2A2B30] border-b border-gray-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16 gap-4">
+            <div className="flex items-center gap-4 flex-shrink-0">
+              <div className="bg-white text-black px-3 py-1 rounded-md font-bold text-sm">
+                FITAI
+              </div>
+              <span className="text-gray-400 text-sm font-semibold">
+                {currentExerciseIndex + 1} / {selectedExercises.length}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide flex-1">
+              {selectedExercises.map((exercise, index) => {
+                const isCompleted = completedExercises.includes(exercise.exercise_id);
+                const isCurrent = index === currentExerciseIndex;
+                return (
+                  <div key={exercise.exercise_id} className="flex items-center gap-2 flex-shrink-0">
+                    <div
+                      className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${
+                        isCurrent
+                          ? "bg-orange-500 text-white shadow-lg"
+                          : isCompleted
+                          ? "bg-green-500/20 text-green-400 line-through"
+                          : "bg-transparent text-gray-500"
+                      }`}
+                    >
+                      {exercise.exercise_name}
+                    </div>
+                    {index < selectedExercises.length - 1 && (
+                      <svg
+                        className={`w-4 h-4 flex-shrink-0 ${
+                          index < currentExerciseIndex ? "text-green-500" : "text-gray-600"
+                        }`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                      </svg>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold">운동 진행 중</h1>
@@ -554,6 +846,129 @@ function ExerciseDetail() {
             </button>
           </div>
         </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* 진행률 */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm text-gray-400">전체 진행률</p>
+            <p className="text-sm font-bold text-orange-500">
+              {Math.round((completedExercises.length / selectedExercises.length) * 100)}%
+            </p>
+          </div>
+          <div className="w-full bg-gray-700 rounded-full h-2 overflow-hidden">
+            <div
+              className="bg-gradient-to-r from-orange-500 to-red-500 h-full transition-all duration-500"
+              style={{ width: `${(completedExercises.length / selectedExercises.length) * 100}%` }}
+            ></div>
+          </div>
+        </div>
+
+        {/* 좌측: 운동 자세 영상 / 우측: 스켈레톤 웹캠 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* 좌측: 운동 자세 영상 (정사각형) */}
+          <div>
+            <h3 className="text-lg font-bold mb-3">🎞️ 운동 자세</h3>
+            <div className="relative w-full aspect-square bg-black rounded-xl overflow-hidden">
+              <video
+                key={currentExercise.exercise_code}
+                src={`/${currentExercise.exercise_code}.mp4`}
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            </div>
+          </div>
+
+          {/* 우측: 스켈레톤 웹캠 */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-bold">🎥 AI 자세 교정</h3>
+              {!isCameraOn ? (
+                <button
+                  onClick={startCamera}
+                  className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition"
+                >
+                  카메라 시작
+                </button>
+              ) : (
+                <button
+                  onClick={stopCamera}
+                  className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition"
+                >
+                  카메라 종료
+                </button>
+              )}
+            </div>
+
+            <div className="relative w-full aspect-square bg-black rounded-xl overflow-hidden">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute inset-0 w-full h-full object-cover"
+                style={{ transform: 'scaleX(-1)' }}
+              />
+              <canvas
+                ref={canvasRef}
+                className="absolute top-0 left-0 w-full h-full"
+                style={{ transform: 'scaleX(-1)' }}
+              />
+
+              {!isCameraOn && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm">
+                  <div className="text-center">
+                    <div className="text-6xl mb-4">📹</div>
+                    <p className="text-xl font-semibold mb-2">카메라를 시작해주세요</p>
+                    {cameraError && (
+                      <p className="text-red-400 text-sm">{cameraError}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 포즈 분석 HUD */}
+              {isCameraOn && poseAnalysis && (
+                <div className="absolute left-3 top-3 bg-black/70 backdrop-blur-md rounded-lg p-3 text-xs min-w-[200px]">
+                  <div className="mb-2">
+                    <span className="font-bold text-purple-400">점수:</span>
+                    <span className="ml-2 text-green-400 font-bold text-base">{poseAnalysis.score}</span>
+                  </div>
+                  <div className="space-y-0.5 text-[11px]">
+                    <div>어깨: <span className="text-green-400">{poseAnalysis.shoulders}</span></div>
+                    <div>골반: <span className="text-green-400">{poseAnalysis.hips}</span></div>
+                    <div>척추: <span className="text-green-400">{poseAnalysis.spine}</span></div>
+                    <div>팔: <span className="text-green-400">{poseAnalysis.elbows}</span></div>
+                  </div>
+                  
+                  {poseAnalysis.errorCodes.length > 0 && (
+                    <>
+                      <hr className="my-2 border-gray-600" />
+                      <div className="text-[11px]">
+                        <div className="text-red-400 font-semibold">오류: {poseAnalysis.errorCodes.join(', ')}</div>
+                      </div>
+                    </>
+                  )}
+                  
+                  {poseAnalysis.hints.length > 0 && (
+                    <>
+                      <hr className="my-2 border-gray-600" />
+                      <div className="text-[11px]">
+                        <ul className="space-y-0.5">
+                          {poseAnalysis.hints.map((hint, idx) => (
+                            <li key={idx} className="text-yellow-300">• {hint}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
 
         {/* 웹캠 영역 */}
         <div className="mb-6">
