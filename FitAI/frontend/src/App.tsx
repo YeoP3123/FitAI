@@ -13,7 +13,6 @@ import ExerciseResult from './pages/ExerciseResult';
 import MyPage from "./pages/MyPage";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
-import ExerciseResult from './pages/ExerciseResult';
 
 function App() {
   return (
