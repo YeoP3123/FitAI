@@ -1,8 +1,25 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
+import base64
+import cv2
+import numpy as np
+import mediapipe as mp
 
 app = FastAPI()
+
+# MediaPipe 초기화
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose(
+    static_image_mode=False,
+    model_complexity=1,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
+
+class PoseAnalysisRequest(BaseModel):
+    image: str  # base64 encoded image
 
 # CORS 설정
 app.add_middleware(
@@ -396,11 +413,11 @@ function drawPose(lm, pts, issues){
   const spineBad    = (issues.angVert      > THRESH_SPINE_ANGLE*1.2);
 
   if (shoulderBad){
-    strokeLine(pts.LS.x, pts.LS.y, pts.RS.x, pts.RS.y, C_BAD, 6); 
+    strokeLine(pts.LS.x, pts.LS.y, pts.RS.x, pts.RS.y, C_BAD, 6);
     dot(pts.LS.x, pts.LS.y, 5, C_BAD); dot(pts.RS.x, pts.RS.y, 5, C_BAD);
   }
   if (hipBad){
-    strokeLine(pts.LH.x, pts.LH.y, pts.RH.x, pts.RH.y, C_BAD, 6); 
+    strokeLine(pts.LH.x, pts.LH.y, pts.RH.x, pts.RH.y, C_BAD, 6);
     dot(pts.LH.x, pts.LH.y, 5, C_BAD); dot(pts.RH.x, pts.RH.y, 5, C_BAD);
   }
   if (spineBad){
@@ -448,7 +465,7 @@ function drawFrame(result){
     setErrorCodes([]);
     scoreEl.textContent = "0.0";
     s_sh.textContent = s_hp.textContent = s_sp.textContent = s_el.textContent = "0";
-    ctx.fillStyle = C_BAD; ctx.font = "16px system-ui, sans-serif"; 
+    ctx.fillStyle = C_BAD; ctx.font = "16px system-ui, sans-serif";
     ctx.fillText("포즈가 감지되지 않습니다", 12, 24);
     return;
   }
@@ -549,6 +566,160 @@ window.addEventListener("beforeunload", stopCamera);
 </html>
     """
     return HTMLResponse(content=html_content)
+
+
+@app.post("/api/analyze-pose")
+async def analyze_pose(request: PoseAnalysisRequest):
+    """프레임 이미지를 받아서 포즈 분석 결과 반환"""
+    try:
+        # base64 디코딩
+        image_data = base64.b64decode(request.image.split(',')[1] if ',' in request.image else request.image)
+        nparr = np.frombuffer(image_data, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        # BGR to RGB
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # MediaPipe 포즈 분석
+        results = pose.process(image_rgb)
+        
+        if not results.pose_landmarks:
+            return JSONResponse(content={
+                "success": False,
+                "message": "No pose detected"
+            })
+        
+        # 랜드마크 추출
+        landmarks = []
+        for landmark in results.pose_landmarks.landmark:
+            landmarks.append({
+                "x": landmark.x,
+                "y": landmark.y,
+                "z": landmark.z,
+                "visibility": landmark.visibility
+            })
+        
+        # 포즈 분석 (서있기 기준)
+        analysis = analyze_standing_pose(landmarks, image.shape[1], image.shape[0])
+        
+        return JSONResponse(content={
+            "success": True,
+            "landmarks": landmarks,
+            "analysis": analysis
+        })
+        
+    except Exception as e:
+        return JSONResponse(content={
+            "success": False,
+            "message": str(e)
+        }, status_code=500)
+
+
+def analyze_standing_pose(landmarks, width, height):
+    """서있기 자세 분석"""
+    # 주요 랜드마크 인덱스
+    LS, RS = 11, 12  # 어깨
+    LE, RE = 13, 14  # 팔꿈치
+    LW, RW = 15, 16  # 손목
+    LH, RH = 23, 24  # 골반
+    LK, RK = 25, 26  # 무릎
+    LA, RA = 27, 28  # 발목
+    
+    def get_point(idx):
+        lm = landmarks[idx]
+        return {
+            'x': lm['x'] * width,
+            'y': lm['y'] * height,
+            'v': lm['visibility']
+        }
+    
+    def distance(p1, p2):
+        return np.sqrt((p1['x'] - p2['x'])**2 + (p1['y'] - p2['y'])**2)
+    
+    def angle_deg(a, b, c):
+        """3점으로 각도 계산 (b가 중심점)"""
+        ba = np.array([a['x'] - b['x'], a['y'] - b['y']])
+        bc = np.array([c['x'] - b['x'], c['y'] - b['y']])
+        
+        cosine = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
+        cosine = np.clip(cosine, -1.0, 1.0)
+        angle = np.arccos(cosine)
+        return np.degrees(angle)
+    
+    # 포인트 가져오기
+    ls, rs = get_point(LS), get_point(RS)
+    le, re = get_point(LE), get_point(RE)
+    lw, rw = get_point(LW), get_point(RW)
+    lh, rh = get_point(LH), get_point(RH)
+    lk, rk = get_point(LK), get_point(RK)
+    la, ra = get_point(LA), get_point(RA)
+    
+    # 중심점
+    mid_sh = {'x': (ls['x'] + rs['x'])/2, 'y': (ls['y'] + rs['y'])/2}
+    mid_hp = {'x': (lh['x'] + rh['x'])/2, 'y': (lh['y'] + rh['y'])/2}
+    
+    # 스케일 계산
+    shoulder_w = distance(ls, rs)
+    torso = distance(mid_sh, mid_hp)
+    scale = max(1e-6, 0.5 * (shoulder_w + torso))
+    
+    # 1. 어깨 수평 (0-25점)
+    shoulders_err = abs(ls['y'] - rs['y']) / scale
+    shoulders_score = 25 if shoulders_err < 0.08 else max(0, 25 * (1 - shoulders_err / 0.16))
+    
+    # 2. 골반 수평 (0-25점)
+    hips_err = abs(lh['y'] - rh['y']) / scale
+    hips_score = 25 if hips_err < 0.10 else max(0, 25 * (1 - hips_err / 0.20))
+    
+    # 3. 척추 수직 (0-25점)
+    spine_angle = abs(np.degrees(np.arctan2(abs(mid_sh['x'] - mid_hp['x']), abs(mid_sh['y'] - mid_hp['y']))))
+    spine_score = 25 if spine_angle < 30 else max(0, 25 * (1 - spine_angle / 60))
+    
+    # 4. 팔꿈치 각도 (0-25점)
+    left_elbow = angle_deg(ls, le, lw)
+    right_elbow = angle_deg(rs, re, rw)
+    elbow_target = 160
+    left_elbow_score = max(0, 12.5 * (1 - abs(left_elbow - elbow_target) / 40))
+    right_elbow_score = max(0, 12.5 * (1 - abs(right_elbow - elbow_target) / 40))
+    elbows_score = left_elbow_score + right_elbow_score
+    
+    # 5. 무릎 각도
+    left_knee = angle_deg(lh, lk, la)
+    right_knee = angle_deg(rh, rk, ra)
+    knee_target = 175
+    left_knee_bad = abs(left_knee - knee_target) > 20
+    right_knee_bad = abs(right_knee - knee_target) > 20
+    
+    # 종합 점수
+    total_score = shoulders_score + hips_score + spine_score + elbows_score
+    total_score = min(100, max(0, total_score))
+    
+    # 오류 코드
+    error_codes = []
+    hints = []
+    
+    if left_elbow_score < 6:
+        error_codes.append(1)
+        hints.append("왼팔(팔꿈치 각도) 교정 필요")
+    if right_elbow_score < 6:
+        error_codes.append(2)
+        hints.append("오른팔(팔꿈치 각도) 교정 필요")
+    if left_knee_bad:
+        error_codes.append(3)
+        hints.append("왼쪽 무릎 각도 교정 필요")
+    if right_knee_bad:
+        error_codes.append(4)
+        hints.append("오른쪽 무릎 각도 교정 필요")
+    
+    return {
+        "score": round(total_score, 1),
+        "shoulders": round(shoulders_score),
+        "hips": round(hips_score),
+        "spine": round(spine_score),
+        "elbows": round(elbows_score),
+        "errorCodes": error_codes,
+        "hints": hints
+    }
 
 
 @app.get("/")
