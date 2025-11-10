@@ -12,6 +12,7 @@ import PostureCorrection from "./pages/PostureCorrection";
 import MyPage from "./pages/MyPage";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
+import ExerciseResult from './pages/ExerciseResult';
 
 function App() {
   return (
@@ -28,6 +29,7 @@ function App() {
         <Route path="/MyPage" element={<MyPage />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/terms-of-service" element={<TermsOfService />} />
+        <Route path="/exercise-result" element={<ExerciseResult />} />
       </Routes>
       <Footer />
     </Router>
