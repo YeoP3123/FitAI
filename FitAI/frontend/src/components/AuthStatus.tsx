@@ -8,24 +8,13 @@ const AuthStatus: React.FC = () => {
   const [displayName, setDisplayName] = useState<string>("");
 
   useEffect(() => {
-    // ✅ 프로필 최신화 시도 (로그인 상태일 때만)
-    const refreshProfile = async () => {
-      if (auth.isAuthenticated) {
-        try {
-          await auth.signinSilent(); // 새 토큰 요청 및 프로필 갱신
-        } catch (e) {
-          console.warn("프로필 갱신 실패:", e);
-        }
-      }
-    };
-
-    refreshProfile();
-
-    if (auth.user?.profile?.name) {
+    // ✅ 로그인 시 최초 1회만 이름 설정
+    if (auth.isAuthenticated && auth.user?.profile?.name) {
       setDisplayName(auth.user.profile.name);
     }
-  }, [auth.user, auth.isAuthenticated]);
+  }, [auth.isAuthenticated, auth.user?.profile?.name]);
 
+  // ✅ 로그인 상태
   if (auth.isAuthenticated) {
     return (
       <div className="flex items-center gap-3">
@@ -39,6 +28,7 @@ const AuthStatus: React.FC = () => {
     );
   }
 
+  // ✅ 비로그인 상태
   return (
     <button
       onClick={() => auth.signinRedirect()}
