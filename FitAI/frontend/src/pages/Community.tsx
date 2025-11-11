@@ -59,20 +59,13 @@ function Community() {
     }
   };
 
-  // 초기 게시물 로드
-  useEffect(() => {
-    fetchPosts(1);
-  }, []);
 
+// ✅ 1. observer: 페이지 번호만 올리기
 useEffect(() => {
   const observer = new IntersectionObserver(
     (entries) => {
       if (entries[0].isIntersecting && hasMoreData && !isLoading) {
-        setCurrentPage((prevPage) => {
-          const nextPage = prevPage + 1;
-          fetchPosts(nextPage);
-          return nextPage;
-        });
+        setCurrentPage((prevPage) => prevPage + 1);
       }
     },
     { threshold: 0.1 }
@@ -80,14 +73,15 @@ useEffect(() => {
 
   const target = scrollObserverTarget.current;
   if (target) observer.observe(target);
-
-  // ✅ TypeScript 대응용 정리 함수
   return () => {
-    if (target) {
-      observer.unobserve(target);
-    }
+    if (target) observer.unobserve(target);
   };
 }, [isLoading, hasMoreData]);
+
+// ✅ 2. currentPage 변경 시에만 fetch 실행
+useEffect(() => {
+  fetchPosts(currentPage);
+}, [currentPage]);
 
 // 메뉴 외부 클릭 시 자동 닫기
 useEffect(() => {
