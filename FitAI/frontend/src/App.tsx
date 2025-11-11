@@ -13,6 +13,7 @@ import CreatePost from "./pages/CreatePost";
 import MyPage from "./pages/MyPage";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
+import EditPost from "./pages/EditPost";
 
 function App() {
   return (
@@ -31,6 +32,7 @@ function App() {
         <Route path="/terms-of-service" element={<TermsOfService />} />
         <Route path="/exercise-result" element={<ExerciseResult />} />
         <Route path="/create-post" element={<CreatePost />} />
+        <Route path="/edit-post/:postId" element={<EditPost />} />
       </Routes>
       <Footer />
     </Router>

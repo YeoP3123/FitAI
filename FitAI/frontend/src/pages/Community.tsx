@@ -28,8 +28,10 @@ function Community() {
   const scrollObserverTarget = useRef<HTMLDivElement>(null);
   const [likedPosts, setLikedPosts] = useState<Record<string, boolean>>({});
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-const [editText, setEditText] = useState("");
-const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [menuOpenPostId, setMenuOpenPostId] = useState<string | null>(null);
+
 
   // ========================
   // 게시물 불러오기
@@ -87,6 +89,12 @@ useEffect(() => {
   };
 }, [isLoading, hasMoreData]);
 
+// 메뉴 외부 클릭 시 자동 닫기
+useEffect(() => {
+  const handleClickOutside = () => setMenuOpenPostId(null);
+  window.addEventListener("click", handleClickOutside);
+  return () => window.removeEventListener("click", handleClickOutside);
+}, []);
 
   // ========================
   // 게시물 상세보기
@@ -426,6 +434,37 @@ const renderComments = (commentList: any[]): React.ReactNode =>
     </div>
   ));
 
+  const handleEditPost = (post: any) => {
+  // 수정 페이지 이동 (state로 게시글 정보 넘김)
+  navigate(`/edit-post/${post.post_id}`, { state: post });
+};
+
+const handleDeletePost = async (post_id: string) => {
+  if (!accessToken) return alert("로그인 후 이용해주세요.");
+  if (!window.confirm("정말로 이 게시글을 삭제하시겠습니까?")) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/posts/${post_id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const json = await res.json();
+
+    if (json.success) {
+      // ✅ 목록에서 제거
+      setPostList((prev) => prev.filter((p) => p.post_id !== post_id));
+      if (selectedPostData?.post_id === post_id) {
+        setSelectedPostData(null);
+      }
+      alert("게시글이 삭제되었습니다.");
+    } else {
+      alert("삭제 실패: " + json.message);
+    }
+  } catch (err) {
+    console.error("게시글 삭제 실패:", err);
+    alert("게시글 삭제 중 오류가 발생했습니다.");
+  }
+};
 
   return (
     <>
@@ -441,26 +480,61 @@ const renderComments = (commentList: any[]): React.ReactNode =>
               >
                 {/* 헤더 */}
                 <div className="flex items-center justify-between p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gray-600 rounded-full flex items-center justify-center">
-                      <span className="text-sm">👤</span>
-                    </div>
-                    <div>
-                      <div className="font-semibold text-sm">
-                        {post.user_id || "FitAI 사용자"}
-                      </div>
-                      <div className="text-xs text-gray-400">
-                        {new Date(post.post_created).toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    className="text-gray-400 text-xl"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    ⋯
-                  </button>
-                </div>
+  <div className="flex items-center gap-3">
+    <div className="w-10 h-10 bg-gray-600 rounded-full flex items-center justify-center">
+      <span className="text-sm">👤</span>
+    </div>
+    <div>
+      <div className="font-semibold text-sm">
+        {post.user_id || "FitAI 사용자"}
+      </div>
+      <div className="text-xs text-gray-400">
+        {new Date(post.post_created).toLocaleString()}
+      </div>
+    </div>
+  </div>
+
+  {/* ⋯ 버튼 + 토글 메뉴 */}
+  <div className="relative">
+    <button
+      className="text-gray-400 text-xl"
+      onClick={(e) => {
+        e.stopPropagation();
+        setMenuOpenPostId(
+          menuOpenPostId === post.post_id ? null : post.post_id
+        );
+      }}
+    >
+      ⋯
+    </button>
+
+    {menuOpenPostId === post.post_id && (
+      <div className="absolute right-0 mt-2 w-32 bg-[#2A2B30] border border-gray-700 rounded-lg shadow-lg z-20">
+        <button
+          className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpenPostId(null);
+            handleEditPost(post);
+          }}
+        >
+          ✏️ 게시글 수정
+        </button>
+        <button
+          className="block w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpenPostId(null);
+            handleDeletePost(post.post_id);
+          }}
+        >
+          🗑️ 게시글 삭제
+        </button>
+      </div>
+    )}
+  </div>
+</div>
+
 
                 {/* 내용 */}
                 <div className="px-4 pb-3">
@@ -619,21 +693,61 @@ const renderComments = (commentList: any[]): React.ReactNode =>
             <div className="max-w-7xl mx-auto pb-20 px-8 py-6">
               <div className="bg-[#2A2B30]">
                 <div className="flex items-center justify-between p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gray-600 rounded-full flex items-center justify-center">
-                      <span className="text-sm">👤</span>
-                    </div>
-                    <div>
-                      <div className="font-semibold text-sm text-white">
-                        {selectedPostData.user_id}
-                      </div>
-                      <div className="text-xs text-gray-400">
-                        {new Date(selectedPostData.post_created).toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-                  <button className="text-gray-400 text-xl">⋯</button>
-                </div>
+  <div className="flex items-center gap-3">
+    <div className="w-10 h-10 bg-gray-600 rounded-full flex items-center justify-center">
+      <span className="text-sm">👤</span>
+    </div>
+    <div>
+      <div className="font-semibold text-sm text-white">
+        {selectedPostData.user_id}
+      </div>
+      <div className="text-xs text-gray-400">
+        {new Date(selectedPostData.post_created).toLocaleString()}
+      </div>
+    </div>
+  </div>
+
+  {/* ⋯ 버튼 + 메뉴 */}
+  <div className="relative">
+    <button
+      className="text-gray-400 text-xl"
+      onClick={(e) => {
+        e.stopPropagation();
+        setMenuOpenPostId(
+          menuOpenPostId === selectedPostData.post_id ? null : selectedPostData.post_id
+        );
+      }}
+    >
+      ⋯
+    </button>
+
+    {menuOpenPostId === selectedPostData.post_id && (
+      <div className="absolute right-0 mt-2 w-32 bg-[#2A2B30] border border-gray-700 rounded-lg shadow-lg z-20">
+        <button
+          className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpenPostId(null);
+            handleEditPost(selectedPostData);
+          }}
+        >
+          ✏️ 게시글 수정
+        </button>
+        <button
+          className="block w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpenPostId(null);
+            handleDeletePost(selectedPostData.post_id);
+          }}
+        >
+          🗑️ 게시글 삭제
+        </button>
+      </div>
+    )}
+  </div>
+</div>
+
 
                 <div className="px-4 pb-3">
                   <p className="text-sm text-white">{selectedPostData.post_text}</p>
