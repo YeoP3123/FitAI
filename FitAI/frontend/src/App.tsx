@@ -8,8 +8,8 @@ import Exercise from "./pages/Exercise";
 import ExerciseDetail from "./pages/ExerciseDetail";
 import MyProfile from "./pages/myProfile";
 import PostureCorrection from "./pages/PostureCorrection";
-import ExerciseResult from './pages/ExerciseResult';
-
+import ExerciseResult from './pages/Exerciseresult';
+import CreatePost from "./pages/CreatePost";
 import MyPage from "./pages/MyPage";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
@@ -30,6 +30,7 @@ function App() {
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/terms-of-service" element={<TermsOfService />} />
         <Route path="/exercise-result" element={<ExerciseResult />} />
+        <Route path="/create-post" element={<CreatePost />} />
       </Routes>
       <Footer />
     </Router>

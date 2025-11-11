@@ -1,9 +1,23 @@
 import { useState, useEffect, useRef } from "react";
-import { getUserId, getUserInfo } from "../utils/auth"; // ⚙️ Cognito 유틸 import
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "react-oidc-context";
+import dayjs from "dayjs";
+import relativeTime from "dayjs/plugin/relativeTime";
+import "dayjs/locale/ko";
+dayjs.extend(relativeTime);
+dayjs.locale("ko");
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
 function Community() {
+  const navigate = useNavigate();
+  const auth = useAuth();
+
+  // ✅ 로그인 사용자 정보
+  const user = auth.user?.profile;
+  const accessToken = auth.user?.access_token;
+  const userId = user?.sub;
+
   const [postList, setPostList] = useState<any[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -12,18 +26,14 @@ function Community() {
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState("");
   const scrollObserverTarget = useRef<HTMLDivElement>(null);
+  const [likedPosts, setLikedPosts] = useState<Record<string, boolean>>({});
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+const [editText, setEditText] = useState("");
+const [replyTo, setReplyTo] = useState<string | null>(null);
 
-  // 로그인 사용자
-  const [userInfo, setUserInfo] = useState<any>(null);
-  useEffect(() => {
-    const fetchUser = async () => {
-      const info = await getUserInfo();
-      setUserInfo(info);
-    };
-    fetchUser();
-  }, []);
-
+  // ========================
   // 게시물 불러오기
+  // ========================
   const fetchPosts = async (pageNumber: number) => {
     if (isLoading || !hasMoreData) return;
     setIsLoading(true);
@@ -32,12 +42,11 @@ function Community() {
       const json = await res.json();
       if (json.success && json.data) {
         setPostList((prev) => {
-  const newPosts = json.data.filter(
-    (p: any) => !prev.some((item) => item.post_id === p.post_id)
-  );
-  return [...prev, ...newPosts];
-});
-
+          const newPosts = json.data.filter(
+            (p: any) => !prev.some((item) => item.post_id === p.post_id)
+          );
+          return [...prev, ...newPosts];
+        });
         if (json.data.length < 5) setHasMoreData(false);
       } else setHasMoreData(false);
     } catch (err) {
@@ -48,34 +57,40 @@ function Community() {
     }
   };
 
-  // 초기 게시물
+  // 초기 게시물 로드
   useEffect(() => {
     fetchPosts(1);
   }, []);
 
-  // 무한 스크롤
-  useEffect(() => {
-    const scrollObserver = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMoreData && !isLoading) {
-          const nextPage = currentPage + 1;
-          setCurrentPage(nextPage);
+useEffect(() => {
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0].isIntersecting && hasMoreData && !isLoading) {
+        setCurrentPage((prevPage) => {
+          const nextPage = prevPage + 1;
           fetchPosts(nextPage);
-        }
-      },
-      { threshold: 0.1 }
-    );
+          return nextPage;
+        });
+      }
+    },
+    { threshold: 0.1 }
+  );
 
-    if (scrollObserverTarget.current)
-      scrollObserver.observe(scrollObserverTarget.current);
+  const target = scrollObserverTarget.current;
+  if (target) observer.observe(target);
 
-    return () => {
-      if (scrollObserverTarget.current)
-        scrollObserver.unobserve(scrollObserverTarget.current);
-    };
-  }, [isLoading, hasMoreData, currentPage]);
+  // ✅ TypeScript 대응용 정리 함수
+  return () => {
+    if (target) {
+      observer.unobserve(target);
+    }
+  };
+}, [isLoading, hasMoreData]);
 
-  // 상세보기 열기
+
+  // ========================
+  // 게시물 상세보기
+  // ========================
   const openPostDetail = async (post: any) => {
     setSelectedPostData(post);
     try {
@@ -89,28 +104,328 @@ function Community() {
     }
   };
 
-  // 댓글 작성
-  const handleAddComment = async () => {
-    if (!newComment.trim() || !selectedPostData) return;
-    try {
-      const res = await fetch(`${API_BASE}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          post_id: selectedPostData.post_id,
-          user_id: userInfo?.userId || "guest",
-          comment_text: newComment.trim(),
-        }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        setComments((prev) => [...prev, json.data]);
-        setNewComment("");
-      }
-    } catch (err) {
-      console.error("댓글 작성 실패:", err);
+  const handleToggleLike = async (post: any) => {
+  if (!accessToken) {
+    alert("로그인 후 이용해주세요.");
+    return;
+  }
+
+  const isCurrentlyLiked = likedPosts[post.post_id] || false;
+  const newLikeState = !isCurrentlyLiked;
+
+  try {
+    // ✅ UI 즉시 반영
+    setLikedPosts((prev) => ({ ...prev, [post.post_id]: newLikeState }));
+
+    // ✅ 게시물 목록 내 좋아요 수 변경
+    setPostList((prevList) =>
+      prevList.map((p) =>
+        p.post_id === post.post_id
+          ? {
+              ...p,
+              post_like_count: (p.post_like_count || 0) + (newLikeState ? 1 : -1),
+            }
+          : p
+      )
+    );
+
+    // ✅ 상세보기 상태 반영 추가 (⭐ 이 부분이 핵심)
+    setSelectedPostData((prev: any) =>
+      prev && prev.post_id === post.post_id
+        ? {
+            ...prev,
+            post_like_count:
+              (prev.post_like_count || 0) + (newLikeState ? 1 : -1),
+          }
+        : prev
+    );
+
+    // ✅ 서버 반영
+    await fetch(`${API_BASE}/posts/${post.post_id}/like`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        is_liked: newLikeState,
+      }),
+    });
+  } catch (err) {
+    console.error("좋아요 토글 실패:", err);
+  }
+};
+
+// ✅ handleAddComment 수정 버전
+const handleAddComment = async () => {
+  if (!newComment.trim() || !selectedPostData) return;
+
+  if (!accessToken) {
+    alert("로그인 후 이용해주세요.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/comments`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        post_id: selectedPostData.post_id,
+        comment_id: `C${Date.now()}`,
+        user_id: userId,
+        comment_text: newComment.trim(),
+      }),
+    });
+
+    const json = await res.json();
+    if (json.success) {
+      // ✅ 댓글 목록 추가
+      setComments((prev) => [...prev, json.data]);
+      setNewComment("");
+
+      // ✅ 상세보기 모달의 댓글 수 증가
+      setSelectedPostData((prev: any) =>
+        prev
+          ? { ...prev, post_comment_count: (prev.post_comment_count || 0) + 1 }
+          : prev
+      );
+
+      // ✅ 메인 목록(postList) 내 댓글 수 증가
+      setPostList((prevList) =>
+        prevList.map((p) =>
+          p.post_id === selectedPostData.post_id
+            ? { ...p, post_comment_count: (p.post_comment_count || 0) + 1 }
+            : p
+        )
+      );
     }
-  };
+  } catch (err) {
+    console.error("댓글 작성 실패:", err);
+  }
+};
+
+const handleEditComment = async (comment: any) => {
+  if (!accessToken) return alert("로그인 후 이용해주세요.");
+  if (!editText.trim()) return;
+
+  try {
+    await fetch(`${API_BASE}/comments`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        post_id: selectedPostData.post_id,
+        comment_id: comment.comment_id,
+        comment_text: editText.trim(),
+      }),
+    });
+
+    // ✅ UI 즉시 반영
+    setComments((prev) =>
+      prev.map((c) =>
+        c.comment_id === comment.comment_id
+          ? { ...c, comment_text: editText.trim() }
+          : c
+      )
+    );
+
+    setEditingCommentId(null);
+    setEditText("");
+  } catch (err) {
+    console.error("댓글 수정 실패:", err);
+  }
+};
+
+const handleDeleteComment = async (comment_id: string) => {
+  if (!accessToken) return alert("로그인 후 이용해주세요.");
+  if (!selectedPostData) return;
+
+  try {
+    await fetch(`${API_BASE}/comments/post/${selectedPostData.post_id}/${comment_id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    setComments((prev) => prev.filter((c) => c.comment_id !== comment_id));
+
+    setSelectedPostData((prev: any) =>
+      prev ? { ...prev, post_comment_count: (prev.post_comment_count || 1) - 1 } : prev
+    );
+  } catch (err) {
+    console.error("댓글 삭제 실패:", err);
+  }
+};
+
+const handleReplySubmit = async (parent_id: string) => {
+  if (!accessToken) return alert("로그인 후 이용해주세요.");
+  if (!newComment.trim()) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/comments`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        post_id: selectedPostData.post_id,
+        comment_id: `C${Date.now()}`,
+        user_id: userId,
+        comment_text: newComment.trim(),
+        parent_comment_id: parent_id,
+      }),
+    });
+
+    const json = await res.json();
+    if (json.success) {
+      setComments((prev) => [...prev, json.data]);
+      setNewComment("");
+      setReplyTo(null);
+
+      // ✅ 추가: 대댓글 등록 시 댓글 수 갱신
+      setSelectedPostData((prev: any) =>
+        prev
+          ? { ...prev, post_comment_count: (prev.post_comment_count || 0) + 1 }
+          : prev
+      );
+
+      setPostList((prevList) =>
+        prevList.map((p) =>
+          p.post_id === selectedPostData.post_id
+            ? { ...p, post_comment_count: (p.post_comment_count || 0) + 1 }
+            : p
+        )
+      );
+    }
+  } catch (err) {
+    console.error("대댓글 작성 실패:", err);
+  }
+};
+
+
+// ✅ 부모-자식 구조로 댓글 계층화
+const buildCommentTree = (comments: any[]) => {
+  const map: Record<string, any> = {};
+  const roots: any[] = [];
+
+  comments.forEach((c) => {
+    map[c.comment_id] = { ...c, replies: [] };
+  });
+
+  comments.forEach((c) => {
+    if (c.parent_comment_id) {
+      if (map[c.parent_comment_id]) {
+        map[c.parent_comment_id].replies.push(map[c.comment_id]);
+      }
+    } else {
+      roots.push(map[c.comment_id]);
+    }
+  });
+
+  return roots;
+};
+
+const commentTree = buildCommentTree(comments);
+
+// ✅ 댓글 렌더링 재귀 함수
+const renderComments = (commentList: any[]): React.ReactNode =>
+  commentList.map((c) => (
+    <div key={c.comment_id} className={`flex gap-3 ${c.parent_comment_id ? "ml-10" : ""}`}>
+      <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center flex-shrink-0">
+        <span className="text-xs">👤</span>
+      </div>
+      <div className="flex-1">
+        <div className="bg-[#2A2B30] rounded-2xl px-4 py-3">
+          <div className="font-semibold text-sm mb-1 text-white flex justify-between">
+            <span>{c.user_id}</span>
+            <span className="text-xs text-gray-500">
+              {dayjs(c.comment_created).fromNow()}
+            </span>
+          </div>
+
+          {editingCommentId === c.comment_id ? (
+            <div className="flex gap-2 mt-2">
+              <input
+                type="text"
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                className="flex-1 bg-[#1E1F23] text-white px-3 py-1 rounded"
+              />
+              <button
+                onClick={() => handleEditComment(c)}
+                className="text-orange-500 text-sm"
+              >
+                저장
+              </button>
+              <button
+                onClick={() => setEditingCommentId(null)}
+                className="text-gray-400 text-sm"
+              >
+                취소
+              </button>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-300">{c.comment_text}</p>
+          )}
+        </div>
+
+        <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+          {userId === c.user_id && (
+            <>
+              <button
+                onClick={() => {
+                  setEditingCommentId(c.comment_id);
+                  setEditText(c.comment_text);
+                }}
+              >
+                수정
+              </button>
+              <button onClick={() => handleDeleteComment(c.comment_id)}>삭제</button>
+            </>
+          )}
+          <button onClick={() => setReplyTo(c.comment_id)}>답글</button>
+        </div>
+
+        {replyTo === c.comment_id && (
+          <div className="flex gap-2 mt-2 ml-8">
+            <input
+              type="text"
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              placeholder="답글을 입력하세요..."
+              className="flex-1 bg-[#1E1F23] text-white px-3 py-1 rounded"
+            />
+            <button
+              onClick={() => handleReplySubmit(c.comment_id)}
+              className="text-orange-500 text-sm"
+            >
+              게시
+            </button>
+            <button
+              onClick={() => setReplyTo(null)}
+              className="text-gray-400 text-sm"
+            >
+              취소
+            </button>
+          </div>
+        )}
+
+        {/* ✅ 자식 댓글 재귀 */}
+        {c.replies?.length > 0 && (
+          <div className="ml-8 mt-3 space-y-2">
+            {renderComments(c.replies)}
+          </div>
+        )}
+      </div>
+    </div>
+  ));
+
 
   return (
     <>
@@ -165,18 +480,25 @@ function Community() {
 
                 {/* 댓글 영역 */}
                 <div className="px-4 py-2 text-xs text-gray-400">
-                  <span>{post.comment_count || 0}개의 댓글</span>
+                  <span>{post.post_comment_count || 0}개의 댓글</span>
                 </div>
 
                 {/* 좋아요, 댓글, 공유 버튼 */}
                 <div className="flex items-center justify-around py-3 border-t border-gray-700">
                   <button
-                    className="flex flex-col items-center gap-1 text-gray-400 hover:text-white transition"
-                    onClick={(e) => e.stopPropagation()}
+                    className={`flex flex-col items-center gap-1 transition ${
+                      likedPosts[post.post_id]
+                        ? "text-red-500"
+                        : "text-gray-400 hover:text-white"
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleLike(post);
+                    }}
                   >
                     <svg
                       className="w-6 h-6"
-                      fill="none"
+                      fill={likedPosts[post.post_id] ? "currentColor" : "none"}
                       stroke="currentColor"
                       viewBox="0 0 24 24"
                     >
@@ -187,7 +509,7 @@ function Community() {
                         d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5"
                       />
                     </svg>
-                    <span className="text-xs">{post.like_count || 0}</span>
+                    <span className="text-xs">{post.post_like_count || 0}</span>
                   </button>
 
                   <button
@@ -207,7 +529,9 @@ function Community() {
                         d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
                       />
                     </svg>
-                    <span className="text-xs">{post.comment_count || 0}</span>
+                    <span className="text-[11px] font-medium tracking-wide text-gray-400">
+                      {post.post_comment_count || 0}
+                    </span>
                   </button>
 
                   <button
@@ -253,7 +577,10 @@ function Community() {
         </div>
 
         {/* 플로팅 버튼 */}
-        <button className="fixed bottom-24 right-6 w-14 h-14 bg-gradient-to-r from-orange-500 to-red-500 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition">
+        <button
+          className="fixed bottom-24 right-6 w-14 h-14 bg-gradient-to-r from-orange-500 to-red-500 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition"
+          onClick={() => navigate("/create-post")}
+        >
           <svg
             className="w-6 h-6 text-white"
             fill="none"
@@ -326,16 +653,19 @@ function Community() {
                   <span>{comments.length}개의 댓글</span>
                 </div>
 
-                <div className="px-4 py-2 text-xs text-gray-400">
-                  <span>아직 댓글이 없습니다</span>
-                </div>
-
                 {/* 좋아요, 댓글, 공유 버튼 */}
                 <div className="flex items-center justify-around py-3 border-t border-gray-700">
-                  <button className="flex items-center gap-2 text-gray-400 hover:text-white transition">
+                  <button
+                    className={`flex items-center gap-2 transition ${
+                      likedPosts[selectedPostData.post_id]
+                        ? "text-red-500"
+                        : "text-gray-400 hover:text-white"
+                    }`}
+                    onClick={() => handleToggleLike(selectedPostData)}
+                  >
                     <svg
                       className="w-6 h-6"
-                      fill="none"
+                      fill={likedPosts[selectedPostData.post_id] ? "currentColor" : "none"}
                       stroke="currentColor"
                       viewBox="0 0 24 24"
                     >
@@ -347,7 +677,7 @@ function Community() {
                       />
                     </svg>
                     <span className="text-sm">
-                      {selectedPostData.likeCount}
+                      {selectedPostData.post_like_count || 0}
                     </span>
                   </button>
 
@@ -365,8 +695,8 @@ function Community() {
                         d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
                       />
                     </svg>
-                    <span className="text-sm">
-                      {selectedPostData.commentCount}
+                    <span className="text-[13px] font-medium text-gray-400">
+                      {selectedPostData.post_comment_count || 0}
                     </span>
                   </button>
 
@@ -384,9 +714,7 @@ function Community() {
                         d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"
                       />
                     </svg>
-                    <span className="text-sm">
-                      {selectedPostData.shareCount}
-                    </span>
+                    <span className="text-sm">{selectedPostData.shareCount}</span>
                   </button>
                 </div>
               </div>
@@ -395,29 +723,8 @@ function Community() {
               <div className="mt-4 px-4">
                 <h3 className="text-lg font-semibold mb-4 text-white">댓글</h3>
                 <div className="space-y-4">
-                  {comments.length > 0 ? (
-                    comments.map((c) => (
-                      <div key={c.comment_id} className="flex gap-3">
-                        <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center flex-shrink-0">
-                          <span className="text-xs">👤</span>
-                        </div>
-                        <div className="flex-1">
-                          <div className="bg-[#2A2B30] rounded-2xl px-4 py-3">
-                            <div className="font-semibold text-sm mb-1 text-white">
-                              {c.user_id}
-                            </div>
-                            <p className="text-sm text-gray-300">
-                              {c.comment_text}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                            <span>
-                              {new Date(c.comment_created).toLocaleString()}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ))
+                  {commentTree.length > 0 ? (
+                    renderComments(commentTree)
                   ) : (
                     <p className="text-gray-500">아직 댓글이 없습니다</p>
                   )}
