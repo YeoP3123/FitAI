@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { getUserId, getUserInfo } from "../utils/auth"; // ⚙️ Cognito 유틸 import
 
-const API_BASE = "https://zbsnjtikatoqmnawrmi3bwtlie0rzljg.lambda-url.ap-northeast-2.on.aws"; // ⚙️ Lambda API Gateway 주소로 교체
+const API_BASE = import.meta.env.VITE_API_URL;
 
 function Community() {
   const [postList, setPostList] = useState<any[]>([]);
