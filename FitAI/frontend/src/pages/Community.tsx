@@ -182,11 +182,12 @@ const handleAddComment = async () => {
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
-        post_id: selectedPostData.post_id,
-        comment_id: `C${Date.now()}`,
-        user_id: userId,
-        comment_text: newComment.trim(),
-      }),
+  post_id: selectedPostData.post_id,
+  comment_id: `C${Date.now()}`,
+  user_id: userId,
+  user_name: user?.name || "익명 사용자",  // ✅ 추가
+  comment_text: newComment.trim(),
+}),
     });
 
     const json = await res.json();
@@ -282,12 +283,14 @@ const handleReplySubmit = async (parent_id: string) => {
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
-        post_id: selectedPostData.post_id,
-        comment_id: `C${Date.now()}`,
-        user_id: userId,
-        comment_text: newComment.trim(),
-        parent_comment_id: parent_id,
-      }),
+  post_id: selectedPostData.post_id,
+  comment_id: `C${Date.now()}`,
+  user_id: userId,
+  user_name: user?.name || "익명 사용자",  // ✅ 추가
+  comment_text: newComment.trim(),
+  parent_comment_id: parent_id,
+}),
+
     });
 
     const json = await res.json();
@@ -351,7 +354,7 @@ const renderComments = (commentList: any[]): React.ReactNode =>
       <div className="flex-1">
         <div className="bg-[#2A2B30] rounded-2xl px-4 py-3">
           <div className="font-semibold text-sm mb-1 text-white flex justify-between">
-            <span>{c.user_id}</span>
+            <span>{c.user_name || "익명 사용자"}</span>
             <span className="text-xs text-gray-500">
               {dayjs(c.comment_created).fromNow()}
             </span>
@@ -486,8 +489,8 @@ const handleDeletePost = async (post_id: string) => {
     </div>
     <div>
       <div className="font-semibold text-sm">
-        {post.user_id || "FitAI 사용자"}
-      </div>
+  {post.user_name || "FitAI 사용자"}
+</div>
       <div className="text-xs text-gray-400">
         {new Date(post.post_created).toLocaleString()}
       </div>
