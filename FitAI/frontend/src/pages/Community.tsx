@@ -711,44 +711,48 @@ function Community() {
                   </div>
 
                   {/* ⋯ 버튼 + 토글 메뉴 */}
-                  <div className="relative">
-                    <button
-                      className="text-gray-400 text-xl hover:text-white cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setMenuOpenPostId(
-                          menuOpenPostId === post.post_id ? null : post.post_id
-                        );
-                      }}
-                    >
-                      ⋯
-                    </button>
+                  {post.user_id === userId && (
+                    <div className="relative">
+                      <button
+                        className="text-gray-400 text-xl hover:text-white cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuOpenPostId(
+                            menuOpenPostId === post.post_id
+                              ? null
+                              : post.post_id
+                          );
+                        }}
+                      >
+                        ⋯
+                      </button>
 
-                    {menuOpenPostId === post.post_id && (
-                      <div className="absolute right-0 mt-2 w-32 bg-[#2A2B30] border border-gray-700 rounded-lg shadow-lg z-20">
-                        <button
-                          className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMenuOpenPostId(null);
-                            handleEditPost(post);
-                          }}
-                        >
-                          ✏️ 게시글 수정
-                        </button>
-                        <button
-                          className="block w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700 cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMenuOpenPostId(null);
-                            handleDeletePost(post.post_id);
-                          }}
-                        >
-                          🗑️ 게시글 삭제
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                      {menuOpenPostId === post.post_id && (
+                        <div className="absolute right-0 mt-2 w-32 bg-[#2A2B30] border border-gray-700 rounded-lg shadow-lg z-20">
+                          <button
+                            className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuOpenPostId(null);
+                              handleEditPost(post);
+                            }}
+                          >
+                            ✏️ 게시글 수정
+                          </button>
+                          <button
+                            className="block w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700 cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuOpenPostId(null);
+                              handleDeletePost(post.post_id);
+                            }}
+                          >
+                            🗑️ 게시글 삭제
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* 내용 */}
@@ -758,11 +762,11 @@ function Community() {
 
                 {/* 이미지 */}
                 {post.post_image_url && (
-                  <div className="bg-gray-700 h-64 flex items-center justify-center text-gray-500">
+                  <div className="bg-gray-700 flex items-center justify-center text-gray-500">
                     <img
                       src={post.post_image_url}
                       alt="게시물 이미지"
-                      className="object-cover w-full h-full"
+                      className="max-w-full h-auto object-contain"
                     />
                   </div>
                 )}
@@ -946,46 +950,48 @@ function Community() {
                   </div>
 
                   {/* ⋯ 버튼 + 메뉴 */}
-                  <div className="relative">
-                    <button
-                      className="text-gray-400 text-xl hover:text-white cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setMenuOpenPostId(
-                          menuOpenPostId === selectedPostData.post_id
-                            ? null
-                            : selectedPostData.post_id
-                        );
-                      }}
-                    >
-                      ⋯
-                    </button>
+                  {selectedPostData.user_id === userId && (
+                    <div className="relative">
+                      <button
+                        className="text-gray-400 text-xl hover:text-white cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuOpenPostId(
+                            menuOpenPostId === selectedPostData.post_id
+                              ? null
+                              : selectedPostData.post_id
+                          );
+                        }}
+                      >
+                        ⋯
+                      </button>
 
-                    {menuOpenPostId === selectedPostData.post_id && (
-                      <div className="absolute right-0 mt-2 w-32 bg-[#2A2B30] border border-gray-700 rounded-lg shadow-lg z-20">
-                        <button
-                          className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMenuOpenPostId(null);
-                            handleEditPost(selectedPostData);
-                          }}
-                        >
-                          ✏️ 게시글 수정
-                        </button>
-                        <button
-                          className="block w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700 cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMenuOpenPostId(null);
-                            handleDeletePost(selectedPostData.post_id);
-                          }}
-                        >
-                          🗑️ 게시글 삭제
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                      {menuOpenPostId === selectedPostData.post_id && (
+                        <div className="absolute right-0 mt-2 w-32 bg-[#2A2B30] border border-gray-700 rounded-lg shadow-lg z-20">
+                          <button
+                            className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuOpenPostId(null);
+                              handleEditPost(selectedPostData);
+                            }}
+                          >
+                            ✏️ 게시글 수정
+                          </button>
+                          <button
+                            className="block w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700 cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuOpenPostId(null);
+                              handleDeletePost(selectedPostData.post_id);
+                            }}
+                          >
+                            🗑️ 게시글 삭제
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* 내용 */}
@@ -997,11 +1003,11 @@ function Community() {
 
                 {/* 이미지 */}
                 {selectedPostData.post_image_url && (
-                  <div className="bg-gray-700 h-96 flex items-center justify-center text-gray-500">
+                  <div className="bg-gray-700 flex items-center justify-center text-gray-500">
                     <img
                       src={selectedPostData.post_image_url}
                       alt="게시물 이미지"
-                      className="object-cover w-full h-full"
+                      className="max-w-full h-auto object-contain"
                     />
                   </div>
                 )}
