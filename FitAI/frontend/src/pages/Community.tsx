@@ -31,33 +31,49 @@ function Community() {
   const [editText, setEditText] = useState("");
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [menuOpenPostId, setMenuOpenPostId] = useState<string | null>(null);
+  const [lastKey, setLastKey] = useState<any>(null);
 
+// ========================
+// 게시물 불러오기 (페이지네이션 대응)
+// ========================
+const fetchPosts = async (pageNumber: number) => {
+  if (isLoading || !hasMoreData) return;
+  setIsLoading(true);
+  try {
+    // ✅ lastKey를 URL에 포함
+    const url = lastKey
+      ? `${API_BASE}/posts?limit=5&last_key=${encodeURIComponent(
+          JSON.stringify(lastKey)
+        )}`
+      : `${API_BASE}/posts?limit=5`;
 
-  // ========================
-  // 게시물 불러오기
-  // ========================
-  const fetchPosts = async (pageNumber: number) => {
-    if (isLoading || !hasMoreData) return;
-    setIsLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/posts?page=${pageNumber}&limit=5`);
-      const json = await res.json();
-      if (json.success && json.data) {
-        setPostList((prev) => {
-          const newPosts = json.data.filter(
-            (p: any) => !prev.some((item) => item.post_id === p.post_id)
-          );
-          return [...prev, ...newPosts];
-        });
-        if (json.data.length < 5) setHasMoreData(false);
-      } else setHasMoreData(false);
-    } catch (err) {
-      console.error("게시물 불러오기 실패:", err);
+    const res = await fetch(url);
+    const json = await res.json();
+
+    if (json.success && json.data) {
+      setPostList((prev) => {
+        const newPosts = json.data.filter(
+          (p: any) => !prev.some((item) => item.post_id === p.post_id)
+        );
+        return [...prev, ...newPosts];
+      });
+
+      // ✅ 다음 페이지 키 저장
+      if (json.last_key) {
+        setLastKey(json.last_key);
+      } else {
+        setHasMoreData(false);
+      }
+    } else {
       setHasMoreData(false);
-    } finally {
-      setIsLoading(false);
     }
-  };
+  } catch (err) {
+    console.error("게시물 불러오기 실패:", err);
+    setHasMoreData(false);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
 
 // ✅ 1. observer: 페이지 번호만 올리기
