@@ -8,7 +8,7 @@ import Exercise from "./pages/Exercise";
 import ExerciseDetail from "./pages/ExerciseDetail";
 import MyProfile from "./pages/myProfile";
 import PostureCorrection from "./pages/PostureCorrection";
-import ExerciseResult from './pages/Exerciseresult';
+import ExerciseResult from './pages/ExerciseResult';
 import CreatePost from "./pages/CreatePost";
 import MyPage from "./pages/MyPage";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
