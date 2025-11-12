@@ -32,6 +32,7 @@ function Community() {
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [menuOpenPostId, setMenuOpenPostId] = useState<string | null>(null);
   const [lastKey, setLastKey] = useState<any>(null);
+  const [replyText, setReplyText] = useState("");
 
 // ========================
 // 게시물 불러오기 (페이지네이션 대응)
@@ -283,7 +284,7 @@ const handleDeleteComment = async (comment_id: string) => {
 
 const handleReplySubmit = async (parent_id: string) => {
   if (!accessToken) return alert("로그인 후 이용해주세요.");
-  if (!newComment.trim()) return;
+  if (!replyText.trim()) return; // ✅ 여기 수정!!
 
   try {
     const res = await fetch(`${API_BASE}/comments`, {
@@ -293,23 +294,22 @@ const handleReplySubmit = async (parent_id: string) => {
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
-  post_id: selectedPostData.post_id,
-  comment_id: `C${Date.now()}`,
-  user_id: userId,
-  user_name: user?.name || "익명 사용자",  // ✅ 추가
-  comment_text: newComment.trim(),
-  parent_comment_id: parent_id,
-}),
-
+        post_id: selectedPostData.post_id,
+        comment_id: `C${Date.now()}`,
+        user_id: userId,
+        user_name: user?.name || "익명 사용자",
+        comment_text: replyText.trim(), // ✅ replyText로 변경
+        parent_comment_id: parent_id,
+      }),
     });
 
     const json = await res.json();
     if (json.success) {
       setComments((prev) => [...prev, json.data]);
-      setNewComment("");
+      setReplyText(""); // ✅ replyText 초기화
       setReplyTo(null);
 
-      // ✅ 추가: 대댓글 등록 시 댓글 수 갱신
+      // ✅ 댓글 수 갱신
       setSelectedPostData((prev: any) =>
         prev
           ? { ...prev, post_comment_count: (prev.post_comment_count || 0) + 1 }
@@ -328,6 +328,7 @@ const handleReplySubmit = async (parent_id: string) => {
     console.error("대댓글 작성 실패:", err);
   }
 };
+
 
 
 // ✅ 부모-자식 구조로 댓글 계층화
@@ -358,90 +359,128 @@ const commentTree = buildCommentTree(comments);
 const renderComments = (commentList: any[]): React.ReactNode =>
   commentList.map((c) => (
     <div key={c.comment_id} className={`flex gap-3 ${c.parent_comment_id ? "ml-10" : ""}`}>
+      {/* 프로필 */}
       <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center flex-shrink-0">
         <span className="text-xs">👤</span>
       </div>
+
+      {/* 댓글 본문 */}
       <div className="flex-1">
-        <div className="bg-[#2A2B30] rounded-2xl px-4 py-3">
-          <div className="font-semibold text-sm mb-1 text-white flex justify-between">
-            <span>{c.user_name || "익명 사용자"}</span>
-            <span className="text-xs text-gray-500">
-              {dayjs(c.comment_created).fromNow()}
-            </span>
+        <div className="bg-[#2A2B30] rounded-2xl px-4 py-3 relative">
+          {/* 상단: 이름 + 수정/삭제 버튼 */}
+          <div className="flex justify-between items-start">
+            <div className="font-semibold text-sm text-white">
+              {c.user_name || "익명 사용자"}
+            </div>
+
+            {/* 수정/삭제 버튼 → 오른쪽 상단 */}
+            {userId === c.user_id && (
+              <div className="flex gap-3 text-xs text-gray-400">
+                <button
+                  onClick={() => {
+                    setEditingCommentId(c.comment_id);
+                    setEditText(c.comment_text);
+                  }}
+                  className="hover:text-orange-400 transition"
+                >
+                  수정
+                </button>
+                <button
+                  onClick={() => handleDeleteComment(c.comment_id)}
+                  className="hover:text-red-400 transition"
+                >
+                  삭제
+                </button>
+              </div>
+            )}
           </div>
 
+          {/* 본문 or 수정 중 입력창 */}
           {editingCommentId === c.comment_id ? (
             <div className="flex gap-2 mt-2">
               <input
                 type="text"
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
-                className="flex-1 bg-[#1E1F23] text-white px-3 py-1 rounded"
+                onKeyDown={(e) => e.key === "Enter" && handleEditComment(c)}
+                className="flex-1 bg-[#1E1F23] text-white px-3 py-1 rounded outline-none"
+                placeholder="댓글을 수정하세요..."
               />
               <button
                 onClick={() => handleEditComment(c)}
-                className="text-orange-500 text-sm"
+                className="text-orange-500 text-sm hover:text-orange-400 transition"
               >
                 저장
               </button>
               <button
                 onClick={() => setEditingCommentId(null)}
-                className="text-gray-400 text-sm"
+                className="text-gray-400 text-sm hover:text-gray-300 transition"
               >
                 취소
               </button>
             </div>
           ) : (
-            <p className="text-sm text-gray-300">{c.comment_text}</p>
+            <p className="text-sm text-gray-300 mt-1">{c.comment_text}</p>
           )}
+
+          {/* 하단: 답글 / 시간 */}
+          <div className="flex justify-between items-center mt-3 text-xs text-gray-500">
+            <button
+              onClick={() => {
+                if (!accessToken) {
+                  alert("로그인 후 이용해주세요.");
+                  return;
+                }
+                setReplyTo(c.comment_id);
+                setReplyText("");
+              }}
+              className="hover:text-orange-400 transition"
+            >
+              답글
+            </button>
+            <span>{dayjs(c.comment_created).fromNow()}</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-          {userId === c.user_id && (
-            <>
-              <button
-                onClick={() => {
-                  setEditingCommentId(c.comment_id);
-                  setEditText(c.comment_text);
-                }}
-              >
-                수정
-              </button>
-              <button onClick={() => handleDeleteComment(c.comment_id)}>삭제</button>
-            </>
-          )}
-          <button onClick={() => setReplyTo(c.comment_id)}>답글</button>
-        </div>
-
+        {/* ✅ 답글 입력창 (배경 경계 추가됨) */}
         {replyTo === c.comment_id && (
-          <div className="flex gap-2 mt-2 ml-8">
-            <input
-              type="text"
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              placeholder="답글을 입력하세요..."
-              className="flex-1 bg-[#1E1F23] text-white px-3 py-1 rounded"
-            />
-            <button
-              onClick={() => handleReplySubmit(c.comment_id)}
-              className="text-orange-500 text-sm"
-            >
-              게시
-            </button>
-            <button
-              onClick={() => setReplyTo(null)}
-              className="text-gray-400 text-sm"
-            >
-              취소
-            </button>
+          <div className="mt-3 ml-10">
+            <div className="bg-[#1F2024] rounded-2xl p-3 border border-gray-700 shadow-inner">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 bg-gray-600 rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-xs">👤</span>
+                </div>
+                <input
+                  type="text"
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleReplySubmit(c.comment_id)} // ✅ Enter 작성
+                  placeholder="답글을 입력하세요..."
+                  className="flex-1 bg-[#2A2B30] text-white px-4 py-2 rounded-full outline-none focus:ring-2 focus:ring-orange-500"
+                />
+                <button
+                  onClick={() => handleReplySubmit(c.comment_id)}
+                  className="text-orange-500 text-sm font-semibold hover:text-orange-400 transition"
+                >
+                  게시
+                </button>
+                <button
+                  onClick={() => {
+                    setReplyTo(null);
+                    setReplyText("");
+                  }}
+                  className="text-gray-400 text-sm hover:text-gray-300 transition"
+                >
+                  취소
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
-        {/* ✅ 자식 댓글 재귀 */}
+        {/* 자식 댓글 재귀 */}
         {c.replies?.length > 0 && (
-          <div className="ml-8 mt-3 space-y-2">
-            {renderComments(c.replies)}
-          </div>
+          <div className="ml-8 mt-3 space-y-2">{renderComments(c.replies)}</div>
         )}
       </div>
     </div>
@@ -897,6 +936,7 @@ const handleDeletePost = async (post_id: string) => {
       type="text"
       value={newComment}
       onChange={(e) => setNewComment(e.target.value)}
+      onKeyDown={(e) => e.key === "Enter" && handleAddComment()}
       placeholder="댓글을 입력하세요..."
       className="flex-1 bg-[#1E1F23] text-white px-4 py-2 rounded-full outline-none focus:ring-2 focus:ring-orange-500"
     />
