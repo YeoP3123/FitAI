@@ -307,6 +307,20 @@ function Community() {
 
     if (!selectedPostData) return;
 
+    // ✅ 삭제 전 확인 창 추가
+    const result = await Swal.fire({
+      title: "댓글 삭제",
+      text: "정말 이 댓글을 삭제하시겠습니까?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#d33",
+      cancelButtonColor: "#3085d6",
+      confirmButtonText: "삭제",
+      cancelButtonText: "취소",
+    });
+
+    if (!result.isConfirmed) return;
+
     try {
       await fetch(
         `${API_BASE}/comments/post/${selectedPostData.post_id}/${comment_id}`,
@@ -318,11 +332,40 @@ function Community() {
 
       setComments((prev) => prev.filter((c) => c.comment_id !== comment_id));
 
+      // ✅ 상세보기 댓글 수 감소
       setSelectedPostData((prev: any) =>
         prev
-          ? { ...prev, post_comment_count: (prev.post_comment_count || 1) - 1 }
+          ? {
+              ...prev,
+              post_comment_count: Math.max(
+                (prev.post_comment_count || 1) - 1,
+                0
+              ),
+            }
           : prev
       );
+
+      // ✅ 메인 목록(postList) 댓글 수 동기화 추가
+      setPostList((prevList) =>
+        prevList.map((p) =>
+          p.post_id === selectedPostData.post_id
+            ? {
+                ...p,
+                post_comment_count: Math.max(
+                  (p.post_comment_count || 1) - 1,
+                  0
+                ),
+              }
+            : p
+        )
+      );
+
+      Swal.fire({
+        icon: "success",
+        title: "삭제 완료",
+        text: "댓글이 삭제되었습니다.",
+        confirmButtonColor: "#f97316",
+      });
     } catch (err) {
       Swal.fire({
         icon: "error",
@@ -474,8 +517,8 @@ function Community() {
                   onChange={(e) => setEditText(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
-                      e.preventDefault(); // ✅ 폼 제출/리렌더 방지
-                      handleAddComment();
+                      e.preventDefault(); // 폼 리렌더 방지
+                      handleEditComment(c); // ✅ 수정: 이 댓글을 저장
                     }
                   }}
                   className="flex-1 bg-[#1E1F23] text-white px-3 py-1 rounded outline-none"
@@ -538,12 +581,13 @@ function Community() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        handleAddComment();
+                        handleReplySubmit(c.comment_id); // ✅ 수정: 답글용 함수 호출
                       }
                     }}
                     placeholder="답글을 입력하세요..."
                     className="flex-1 bg-[#2A2B30] text-white px-4 py-2 rounded-full outline-none focus:ring-2 focus:ring-orange-500"
                   />
+
                   <button
                     onClick={() => handleReplySubmit(c.comment_id)}
                     className="text-orange-500 text-sm font-semibold hover:text-orange-400 transition"
