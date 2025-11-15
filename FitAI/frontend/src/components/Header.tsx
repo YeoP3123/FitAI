@@ -53,7 +53,7 @@ const Header: React.FC = () => {
         >
           커뮤니티
         </Link>
-        <a href="#" className="text-white hover:text-orange-500 transition">
+        <a href="/mypagehistory" className="text-white hover:text-orange-500 transition">
           내 기록
         </a>
       </nav>

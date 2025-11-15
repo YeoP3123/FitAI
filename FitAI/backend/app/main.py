@@ -1,11 +1,12 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import base64
 import cv2
 import numpy as np
 import mediapipe as mp
+import math
 
 app = FastAPI()
 
@@ -19,7 +20,8 @@ pose = mp_pose.Pose(
 )
 
 class PoseAnalysisRequest(BaseModel):
-    image: str  # base64 encoded image
+    image: str
+    exercise_code: str = "standing"
 
 # CORS 설정
 app.add_middleware(
@@ -30,566 +32,312 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ================== 유틸리티 함수 ==================
+def _len3(a, b):
+    """3D 거리 계산"""
+    dx, dy = a[0]-b[0], a[1]-b[1]
+    dz = (a[2]-b[2]) if len(a)>2 else 0.0
+    return math.sqrt(dx*dx + dy*dy + dz*dz)
 
-@app.get("/pose-analysis", response_class=HTMLResponse)
-async def pose_analysis():
-    """실시간 포즈 분석 페이지"""
-    html_content = """
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FITAI - 실시간 자세 분석</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Noto Sans KR', system-ui, -apple-system, sans-serif;
-            background: #0f0f0f;
-            color: #fff;
-            padding: 20px;
-        }
-        #pose-app {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        h1 {
-            font-size: 2rem;
-            margin-bottom: 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .controls {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            flex-wrap: wrap;
-            margin-bottom: 20px;
-        }
-        button {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            transition: all 0.3s;
-        }
-        #btnStart {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        #btnStart:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-        }
-        #btnStop {
-            background: #ff4757;
-            color: white;
-        }
-        #btnStop:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(255, 71, 87, 0.4);
-        }
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        select {
-            padding: 8px 12px;
-            border-radius: 6px;
-            border: 1px solid #333;
-            background: #1a1a1a;
-            color: white;
-            cursor: pointer;
-        }
-        .video-container {
-            position: relative;
-            width: 100%;
-            aspect-ratio: 16/9;
-            background: #000;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-        }
-        video, canvas {
-            width: 100%;
-            height: 100%;
-        }
-        video {
-            object-fit: cover;
-        }
-        canvas {
-            position: absolute;
-            left: 0;
-            top: 0;
-        }
-        #hud {
-            position: absolute;
-            left: 20px;
-            top: 20px;
-            padding: 16px 20px;
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(10px);
-            border-radius: 12px;
-            font-size: 14px;
-            line-height: 1.6;
-            min-width: 280px;
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-        #hud b { color: #667eea; }
-        #hud hr {
-            border: none;
-            border-top: 1px solid rgba(255,255,255,0.1);
-            margin: 12px 0;
-        }
-        .score-value {
-            display: inline-block;
-            min-width: 40px;
-            text-align: right;
-            font-weight: 600;
-            color: #00ff88;
-        }
-        #errText {
-            color: #ff4757;
-            font-weight: 600;
-            margin-top: 8px;
-        }
-        #hints {
-            list-style: none;
-            padding-left: 0;
-        }
-        #hints li {
-            padding: 4px 0;
-            color: #ffd166;
-        }
-        .info {
-            font-size: 13px;
-            color: #888;
-            margin-top: 16px;
-            line-height: 1.6;
-        }
-        .status {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            background: rgba(102, 126, 234, 0.2);
-            color: #667eea;
-            font-size: 13px;
-        }
-    </style>
-</head>
-<body>
-    <div id="pose-app">
-        <h1>🏋️ FITAI - 실시간 자세 분석</h1>
-        
-        <div class="controls">
-            <button id="btnStart">카메라 시작</button>
-            <button id="btnStop" disabled>중지</button>
-            <label>
-                해상도:
-                <select id="selRes">
-                    <option value="640x480">640×480</option>
-                    <option value="960x540">960×540</option>
-                    <option value="1280x720" selected>1280×720</option>
-                </select>
-            </label>
-            <label>
-                FPS:
-                <select id="selFps">
-                    <option>15</option>
-                    <option selected>30</option>
-                    <option>60</option>
-                </select>
-            </label>
-            <span id="status" class="status">대기 중</span>
-        </div>
+def _angle_deg_3d(a, b, c):
+    """3D 공간에서 세 점으로 이루어진 각도 계산 (b가 꼭짓점)"""
+    bax, bay = a[0]-b[0], a[1]-b[1]
+    baz = (a[2]-b[2]) if len(a)>2 else 0.0
+    bcx, bcy = c[0]-b[0], c[1]-b[1]
+    bcz = (c[2]-b[2]) if len(c)>2 else 0.0
+    
+    na = math.sqrt(bax*bax + bay*bay + baz*baz)
+    nb = math.sqrt(bcx*bcx + bcy*bcy + bcz*bcz)
+    
+    if na == 0 or nb == 0:
+        return None
+    
+    cosang = max(-1.0, min(1.0, (bax*bcx + bay*bcy + baz*bcz)/(na*nb)))
+    return math.degrees(math.acos(cosang))
 
-        <div class="video-container">
-            <video id="cam" playsinline autoplay muted></video>
-            <canvas id="overlay"></canvas>
+def _sigmoid_score(x, center, width, max_score):
+    """시그모이드 기반 점수 계산"""
+    s = 1.0 / (1.0 + math.exp((abs(x - center))/max(width, 1e-6)))
+    return max_score * s
 
-            <div id="hud">
-                <div style="margin-bottom: 12px;">
-                    <b>종합 점수</b>: <span id="score" class="score-value">0.0</span>
-                </div>
-                <div>어깨 수평: <span id="s_sh" class="score-value">0</span></div>
-                <div>골반 수평: <span id="s_hp" class="score-value">0</span></div>
-                <div>척추 수직: <span id="s_sp" class="score-value">0</span></div>
-                <div>팔꿈치 각도: <span id="s_el" class="score-value">0</span></div>
-                
-                <hr>
-                
-                <div>
-                    <b>오류 부위</b> 
-                    <small>(1=왼팔, 2=오른팔, 3=왼다리, 4=오른다리)</small>
-                </div>
-                <div id="errText">ERR: []</div>
-                <div id="errCodes" style="display:none;"></div>
-                
-                <hr>
-                
-                <div><b>교정 안내</b></div>
-                <ul id="hints"></ul>
-            </div>
-        </div>
+def _huber_like(err, delta):
+    """Huber-like 손실 함수 - 더 가파른 감소"""
+    aerr = abs(err)
+    if aerr <= delta:
+        return 1.0 - (aerr / delta)  # 선형 감소를 더 가파르게
+    return max(0.0, 0.3 * (delta / aerr))  # delta 초과시 더 급격한 감소
 
-        <p class="info">
-            💡 모든 처리는 브라우저에서 실시간으로 수행됩니다.<br>
-            틀린 부위는 <span style="color:#ff3333;">빨간색</span>으로 강조되며, 
-            오류코드가 실시간으로 표시됩니다.
-        </p>
-    </div>
+def _safe_get_xyz(lms, idx):
+    """랜드마크에서 안전하게 x, y, z, visibility 추출"""
+    lm = lms[idx]
+    return (lm['x'], lm['y'], lm.get('z', 0.0), lm.get('visibility', 1.0))
 
-<script type="module">
-/* ================== 임계값 ================== */
-const THRESH_SHOULDERS_ERR = 0.08;
-const THRESH_HIPS_ERR      = 0.10;
-const THRESH_SPINE_ANGLE   = 30;
-const TARGET_ELBOW_DEG     = 160;
-const WIDTH_ELBOW_SIGM     = 35;
-const MIN_ELBOW_SCORE      = 6;
+def _component_vis_ok(vlist, thr=0.5, frac=0.6):
+    """컴포넌트의 가시성이 충분한지 체크"""
+    vs = [v for v in vlist if v is not None]
+    if not vs:
+        return False
+    good = sum(1 for v in vs if v >= thr)
+    return (good / len(vs)) >= frac
 
-const TARGET_KNEE_DEG      = 175;
-const ALLOW_KNEE_DEVI      = 20;
-
-/* ================== MediaPipe ================== */
-import {
-  FilesetResolver,
-  PoseLandmarker
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.13/vision_bundle.mjs";
-
-/* ================== DOM ================== */
-const btnStart = document.getElementById("btnStart");
-const btnStop  = document.getElementById("btnStop");
-const selRes   = document.getElementById("selRes");
-const selFps   = document.getElementById("selFps");
-const statusEl = document.getElementById("status");
-
-const video  = document.getElementById("cam");
-const canvas = document.getElementById("overlay");
-const ctx    = canvas.getContext("2d");
-const scoreEl= document.getElementById("score");
-const s_sh   = document.getElementById("s_sh");
-const s_hp   = document.getElementById("s_hp");
-const s_sp   = document.getElementById("s_sp");
-const s_el   = document.getElementById("s_el");
-const hintsUl= document.getElementById("hints");
-const errText= document.getElementById("errText");
-const errCodesEl = document.getElementById("errCodes");
-
-/* ================== 상태 ================== */
-let landmarker = null, running = false, lastVideoTime = -1, emaScore = null, stream = null, rafId = null;
-
-/* ================== 색상/연결 ================== */
-const C_WHITE = "#ffffff", C_GOOD="#00ff88", C_WARN="#ffd166", C_BAD="#ff3333", C_OKCONN="#00ff00";
-const CONN = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
-
-/* ================== 유틸 ================== */
-function lerp(a,b,t){ return a+(b-a)*t; }
-function ema(prev, curr, alpha=0.3){ return (prev==null)? curr : lerp(prev, curr, alpha); }
-function clamp(x, lo, hi){ return Math.max(lo, Math.min(hi, x)); }
-
-function resizeCanvasToDisplaySize() {
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-    canvas.width  = Math.floor(w * dpr);
-    canvas.height = Math.floor(h * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-}
-function len2(ax,ay, bx,by){ const dx=ax-bx, dy=ay-by; return Math.hypot(dx,dy); }
-function angleDeg(ax,ay, bx,by, cx,cy){
-  const bax=ax-bx, bay=ay-by, bcx=cx-bx, bcy=cy-by;
-  const na=Math.hypot(bax,bay), nb=Math.hypot(bcx,bcy);
-  if(!na||!nb) return null;
-  let cos=(bax*bcx + bay*bcy)/(na*nb);
-  cos=clamp(cos,-1,1);
-  return Math.acos(cos)*180/Math.PI;
-}
-function huberLike(err, delta){ const a=Math.abs(err); return (a<=delta)? 1-(a/(2*delta)) : Math.max(0, 0.5*(delta/a)); }
-function sigmoidScore(x, center, width, maxScore){
-  const s = 1 / (1 + Math.exp(Math.abs(x-center)/Math.max(1e-6,width)));
-  return maxScore * s;
+# ================== 운동별 파라미터 ==================
+EXERCISE_PARAMS = {
+    "standing": {
+        "target_elbow_deg": 160,
+        "width_elbow_sigm": 25,
+        "min_elbow_score": 6,
+        "target_knee_deg": 175,
+        "allow_knee_deviation": 20
+    },
+    "plank": {
+        "target_elbow_deg": 170,
+        "width_elbow_sigm": 25,
+        "min_elbow_score": 7,
+        "target_knee_deg": 175,
+        "allow_knee_deviation": 20
+    },
+    "pushup": {
+        "target_elbow_deg": 100,
+        "width_elbow_sigm": 30,
+        "min_elbow_score": 7,
+        "target_knee_deg": 175,
+        "allow_knee_deviation": 25
+    },
+    "squat": {
+        "target_elbow_deg": 160,
+        "width_elbow_sigm": 35,
+        "min_elbow_score": 0,
+        "target_knee_deg": 100,
+        "allow_knee_deviation": 25
+    },
+    "lunge": {
+        "target_elbow_deg": 160,
+        "width_elbow_sigm": 35,
+        "min_elbow_score": 3,
+        "target_knee_deg": 100,
+        "allow_knee_deviation": 30
+    },
+    # "side_plank": {
+    #     "target_elbow_deg": 90,
+    #     "width_elbow_sigm": 25,
+    #     "min_elbow_score": 6,
+    #     "target_knee_deg": 175,
+    #     "allow_knee_deviation": 25
+    # }
 }
 
-/* ================== 스코어링 & 플래그 ================== */
-function scoreAndFlags(lm){
-  const I = { LS:11, RS:12, LE:13, RE:14, LW:15, RW:16, LH:23, RH:24, LK:25, RK:26, LA:27, RA:28 };
-  const W = canvas.clientWidth, H = canvas.clientHeight;
-  function P(i){ const p = lm[i]; return {x:p.x*W, y:p.y*H, v:p.visibility??1}; }
-
-  const LS=P(I.LS), RS=P(I.RS), LE=P(I.LE), RE=P(I.RE), LW=P(I.LW), RW=P(I.RW),
-        LH=P(I.LH), RH=P(I.RH), LK=P(I.LK), RK=P(I.RK), LA=P(I.LA), RA=P(I.RA);
-
-  const midSh = {x:(LS.x+RS.x)/2, y:(LS.y+RS.y)/2};
-  const midHp = {x:(LH.x+RH.x)/2, y:(LH.y+RH.y)/2};
-
-  const shoulderW = len2(LS.x,LS.y, RS.x,RS.y);
-  const torso     = len2(midSh.x,midSh.y, midHp.x,midHp.y);
-  const scale     = Math.max(1e-6, 0.5*(shoulderW + torso));
-
-  const shouldersErr = Math.abs(LS.y - RS.y) / scale;
-  const hipsErr      = Math.abs(LH.y - RH.y) / scale;
-
-  const shScore  = 25 * huberLike(shouldersErr, THRESH_SHOULDERS_ERR);
-  const hpScore  = 25 * huberLike(hipsErr,      THRESH_HIPS_ERR) * (20/25);
-
-  const v = {x: midSh.x - midHp.x, y: midSh.y - midHp.y};
-  const angVert = Math.abs(Math.atan2(Math.abs(v.x), Math.abs(v.y))*180/Math.PI);
-  const spScore = 25 * huberLike(angVert, THRESH_SPINE_ANGLE);
-
-  const L_ang = angleDeg(LS.x,LS.y, LE.x,LE.y, LW.x,LW.y);
-  const R_ang = angleDeg(RS.x,RS.y, RE.x,RE.y, RW.x,RW.y);
-  const L_el  = L_ang? sigmoidScore(L_ang, TARGET_ELBOW_DEG, WIDTH_ELBOW_SIGM, 15):0;
-  const R_el  = R_ang? sigmoidScore(R_ang, TARGET_ELBOW_DEG, WIDTH_ELBOW_SIGM, 15):0;
-  const elScore = L_el + R_el;
-
-  const L_knee = angleDeg(LH.x,LH.y, LK.x,LK.y, LA.x,LA.y);
-  const R_knee = angleDeg(RH.x,RH.y, RK.x,RK.y, RA.x,RA.y);
-  const L_knee_bad = (L_knee!=null) && (Math.abs(L_knee - TARGET_KNEE_DEG) > ALLOW_KNEE_DEVI);
-  const R_knee_bad = (R_knee!=null) && (Math.abs(R_knee - TARGET_KNEE_DEG) > ALLOW_KNEE_DEVI);
-
-  const visAvg = (LS.v+RS.v+LH.v+RH.v+LE.v+RE.v+LW.v+RW.v+LK.v+RK.v+LA.v+RA.v)/12;
-  const visW   = clamp(0.7 + 0.3*visAvg, 0.7, 1.0);
-
-  const comps = {
-    shoulders_level: Math.round(shScore),
-    hips_level:      Math.round(hpScore),
-    spine_vertical:  Math.round(spScore),
-    elbows_angle:    Math.round(elScore),
-  };
-  let total = (comps.shoulders_level + comps.hips_level + comps.spine_vertical + comps.elbows_angle) * visW;
-  total = clamp(total, 0, 100);
-
-  const leftArmBad  = (L_el < MIN_ELBOW_SCORE);
-  const rightArmBad = (R_el < MIN_ELBOW_SCORE);
-  const leftLegBad  = !!L_knee_bad;
-  const rightLegBad = !!R_knee_bad;
-
-  return {
-    total, comps,
-    points: {LS,RS,LE,RE,LW,RW,LH,RH,LK,RK,LA,RA, midSh, midHp},
-    issues: {leftArmBad, rightArmBad, leftLegBad, rightLegBad,
-             shouldersErr, hipsErr, angVert}
-  };
-}
-
-/* ================== 그리기 헬퍼 ================== */
-function drawGrid(){
-  ctx.strokeStyle = "rgba(255,255,255,.15)";
-  ctx.lineWidth = 1;
-  const W = canvas.clientWidth, H = canvas.clientHeight;
-  ctx.beginPath();
-  ctx.moveTo(W/3, 0);   ctx.lineTo(W/3, H);
-  ctx.moveTo(2*W/3, 0); ctx.lineTo(2*W/3, H);
-  ctx.moveTo(0, H/3);   ctx.lineTo(W, H/3);
-  ctx.moveTo(0, 2*H/3); ctx.lineTo(W, 2*H/3);
-  ctx.stroke();
-}
-function dot(x,y,r,color,glow=true){
-  if(glow){ ctx.shadowColor = color; ctx.shadowBlur = 12; }
-  ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
-}
-function strokeLine(x1,y1,x2,y2,color,width=3,glow=true){
-  ctx.lineWidth = width; ctx.strokeStyle = color;
-  if(glow){ ctx.shadowColor = color; ctx.shadowBlur = 10; }
-  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); ctx.shadowBlur = 0;
-}
-
-/* ================== 포즈 오버레이 + 강조 ================== */
-function drawPose(lm, pts, issues){
-  for (const [a,b] of CONN) {
-    const p = lm[a], q = lm[b];
-    strokeLine(p.x*canvas.clientWidth, p.y*canvas.clientHeight,
-               q.x*canvas.clientWidth, q.y*canvas.clientHeight, C_OKCONN, 3, false);
-  }
-  for (const p of lm) dot(p.x*canvas.clientWidth, p.y*canvas.clientHeight, 3, C_WHITE, false);
-
-  const shoulderBad = (issues.shouldersErr > THRESH_SHOULDERS_ERR*1.2);
-  const hipBad      = (issues.hipsErr      > THRESH_HIPS_ERR*1.2);
-  const spineBad    = (issues.angVert      > THRESH_SPINE_ANGLE*1.2);
-
-  if (shoulderBad){
-    strokeLine(pts.LS.x, pts.LS.y, pts.RS.x, pts.RS.y, C_BAD, 6);
-    dot(pts.LS.x, pts.LS.y, 5, C_BAD); dot(pts.RS.x, pts.RS.y, 5, C_BAD);
-  }
-  if (hipBad){
-    strokeLine(pts.LH.x, pts.LH.y, pts.RH.x, pts.RH.y, C_BAD, 6);
-    dot(pts.LH.x, pts.LH.y, 5, C_BAD); dot(pts.RH.x, pts.RH.y, 5, C_BAD);
-  }
-  if (spineBad){
-    strokeLine(pts.midSh.x, pts.midSh.y, pts.midHp.x, pts.midHp.y, C_BAD, 6);
-    dot(pts.midSh.x, pts.midSh.y, 6, C_BAD); dot(pts.midHp.x, pts.midHp.y, 6, C_BAD);
-  }
-
-  if (issues.leftArmBad){
-    strokeLine(pts.LS.x, pts.LS.y, pts.LE.x, pts.LE.y, C_BAD, 6);
-    strokeLine(pts.LE.x, pts.LE.y, pts.LW.x, pts.LW.y, C_BAD, 6);
-    dot(pts.LE.x, pts.LE.y, 6, C_BAD);
-  }
-  if (issues.rightArmBad){
-    strokeLine(pts.RS.x, pts.RS.y, pts.RE.x, pts.RE.y, C_BAD, 6);
-    strokeLine(pts.RE.x, pts.RE.y, pts.RW.x, pts.RW.y, C_BAD, 6);
-    dot(pts.RE.x, pts.RE.y, 6, C_BAD);
-  }
-
-  if (issues.leftLegBad){
-    strokeLine(pts.LH.x, pts.LH.y, pts.LK.x, pts.LK.y, C_BAD, 6);
-    strokeLine(pts.LK.x, pts.LK.y, pts.LA.x, pts.LA.y, C_BAD, 6);
-    dot(pts.LK.x, pts.LK.y, 6, C_BAD);
-  }
-  if (issues.rightLegBad){
-    strokeLine(pts.RH.x, pts.RH.y, pts.RK.x, pts.RK.y, C_BAD, 6);
-    strokeLine(pts.RK.x, pts.RK.y, pts.RA.x, pts.RA.y, C_BAD, 6);
-    dot(pts.RK.x, pts.RK.y, 6, C_BAD);
-  }
-}
-
-/* ================== 루프 & 오류코드 방출 ================== */
-function setErrorCodes(codes){
-  errText.textContent = "ERR: ["+codes.join(",")+"]";
-  errCodesEl.textContent = codes.join(",");
-  console.log("POSE_ERR codes:", codes);
-  window.dispatchEvent(new CustomEvent('poseErrorCodes', { detail: { codes } }));
-}
-
-function drawFrame(result){
-  resizeCanvasToDisplaySize();
-  ctx.clearRect(0,0,canvas.clientWidth, canvas.clientHeight);
-  drawGrid(); hintsUl.innerHTML = "";
-
-  if (!result || !result.landmarks || !result.landmarks.length){
-    setErrorCodes([]);
-    scoreEl.textContent = "0.0";
-    s_sh.textContent = s_hp.textContent = s_sp.textContent = s_el.textContent = "0";
-    ctx.fillStyle = C_BAD; ctx.font = "16px system-ui, sans-serif";
-    ctx.fillText("포즈가 감지되지 않습니다", 12, 24);
-    return;
-  }
-
-  const lm = result.landmarks[0];
-  const { total, comps, points, issues } = scoreAndFlags(lm);
-  emaScore = ema(emaScore, total, 0.3);
-
-  drawPose(lm, points, issues);
-
-  scoreEl.textContent = (emaScore ?? total).toFixed(1);
-  s_sh.textContent = comps.shoulders_level;
-  s_hp.textContent = comps.hips_level;
-  s_sp.textContent = comps.spine_vertical;
-  s_el.textContent = comps.elbows_angle;
-
-  function hint(t){ const li=document.createElement("li"); li.textContent=t; hintsUl.appendChild(li); }
-  if (issues.leftArmBad)  hint("왼팔(팔꿈치 각도) 교정 필요");
-  if (issues.rightArmBad) hint("오른팔(팔꿈치 각도) 교정 필요");
-  if (issues.leftLegBad)  hint("왼쪽 무릎 각도 교정 필요");
-  if (issues.rightLegBad) hint("오른쪽 무릎 각도 교정 필요");
-
-  const codes = [];
-  if (issues.leftArmBad)  codes.push(1);
-  if (issues.rightArmBad) codes.push(2);
-  if (issues.leftLegBad)  codes.push(3);
-  if (issues.rightLegBad) codes.push(4);
-  setErrorCodes(codes);
-}
-
-/* ================== 시작/중지 ================== */
-async function initLandmarker(){
-  statusEl.textContent = "모델 로딩 중...";
-  const fileset = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.13/wasm"
-  );
-  landmarker = await PoseLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath:
-      "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task" },
-    runningMode: "VIDEO",
-    numPoses: 1
-  });
-  statusEl.textContent = "준비 완료";
-}
-
-async function startCamera(){
-  const [w,h] = selRes.value.split("x").map(Number);
-  const fps = Number(selFps.value);
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { width:{ideal:w}, height:{ideal:h}, frameRate:{ideal:fps} },
-      audio: false
-    });
-    video.srcObject = stream;
-    await video.play();
-    running = true; btnStart.disabled = true; btnStop.disabled = false;
-    statusEl.textContent = "실행 중";
-    loop();
-  } catch(e){
-    console.error(e);
-    statusEl.textContent = "카메라 시작 실패";
-    alert("카메라 권한/장치를 확인해 주세요.");
-    btnStart.disabled = false; btnStop.disabled = true;
-  }
-}
-function stopCamera(){
-  running = false;
-  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  ctx.clearRect(0,0,canvas.clientWidth, canvas.clientHeight);
-  hintsUl.innerHTML = ""; setErrorCodes([]);
-  scoreEl.textContent = "0.0";
-  s_sh.textContent = s_hp.textContent = s_sp.textContent = s_el.textContent = "0";
-  emaScore = null; statusEl.textContent = "중지됨";
-  btnStart.disabled = false; btnStop.disabled  = true;
-}
-function loop(){
-  if (!running || !landmarker) return;
-  const t = performance.now();
-  if (video.currentTime !== lastVideoTime) {
-    lastVideoTime = video.currentTime;
-    const result = landmarker.detectForVideo(video, t);
-    drawFrame(result);
-  }
-  rafId = requestAnimationFrame(loop);
-}
-
-/* ================== 바인딩 ================== */
-btnStart.addEventListener("click", async () => {
-  btnStart.disabled = true;
-  if (!landmarker) await initLandmarker();
-  await startCamera();
-});
-btnStop.addEventListener("click", stopCamera);
-window.addEventListener("beforeunload", stopCamera);
-</script>
-</body>
-</html>
+def score_pose_components(lms, exercise_code="standing"):
     """
-    return HTMLResponse(content=html_content)
+    향상된 포즈 분석 함수
+    - 3D 좌표 사용
+    - 측면 각도(yaw) 고려
+    - 더 엄격한 기준
+    - 정교한 visibility 체크
+    """
+    PL = mp_pose.PoseLandmark
+    
+    def G(i):
+        return _safe_get_xyz(lms, i)
+    
+    # 주요 랜드마크 추출
+    ls = G(PL.LEFT_SHOULDER.value)
+    rs = G(PL.RIGHT_SHOULDER.value)
+    lh = G(PL.LEFT_HIP.value)
+    rh = G(PL.RIGHT_HIP.value)
+    le = G(PL.LEFT_ELBOW.value)
+    re = G(PL.RIGHT_ELBOW.value)
+    lw = G(PL.LEFT_WRIST.value)
+    rw = G(PL.RIGHT_WRIST.value)
+    lk = G(PL.LEFT_KNEE.value)
+    rk = G(PL.RIGHT_KNEE.value)
+    la = G(PL.LEFT_ANKLE.value)
+    ra = G(PL.RIGHT_ANKLE.value)
+    
+    # 중점 계산
+    mid_sh = ((ls[0]+rs[0])/2, (ls[1]+rs[1])/2, (ls[2]+rs[2])/2)
+    mid_hp = ((lh[0]+rh[0])/2, (lh[1]+rh[1])/2, (lh[2]+rh[2])/2)
+    
+    # 스케일 계산
+    shoulder_w = _len3(ls, rs)
+    torso_len = _len3(mid_sh, mid_hp)
+    scale = max(1e-6, 0.5*(shoulder_w + torso_len))
+    
+    # 측면 각도(yaw) 계산
+    dx = rs[0]-ls[0]
+    dz = rs[2]-ls[2]
+    yaw_deg = abs(math.degrees(math.atan2(abs(dz), abs(dx)+1e-6)))
+    
+    # 운동별 파라미터 결정
+    exercise_lower = exercise_code.lower()
+    requires_standing_check = exercise_lower in ["squat", "lunge"]
+    
+    params = EXERCISE_PARAMS.get(exercise_lower, EXERCISE_PARAMS["standing"])
+    target_elbow_deg = params["target_elbow_deg"]
+    width_elbow_sigm = params["width_elbow_sigm"]
+    min_elbow_score = params["min_elbow_score"]
+    target_knee_deg = params["target_knee_deg"]
+    allow_knee_deviation = params["allow_knee_deviation"]
+    
+    # 표시용 파라미터 이름
+    if requires_standing_check:
+        used_params = f"standing+{exercise_lower}"
+    else:
+        used_params = exercise_lower
+    
+    # 1. 어깨 수평 점수 (0-25점)
+    shoulders_err = abs(ls[1]-rs[1]) / scale
+    
+    def level_score(err, base_delta):
+        delta = base_delta*(1.0 + 0.015*yaw_deg)
+        return 25.0 * _huber_like(err, delta)
+    
+    sh_score = level_score(shoulders_err, 0.05)
+    
+    # 2. 골반 수평 점수 (0-20점)
+    hips_err = abs(lh[1]-rh[1]) / scale
+    hip_score = level_score(hips_err, 0.07) * (20.0/25.0)
+    
+    # 3. 척추 수직 점수 (0-25점)
+    v = (mid_sh[0]-mid_hp[0], mid_sh[1]-mid_hp[1])
+    nv = math.hypot(v[0], v[1])
+    ang_vert = 90.0 if nv == 0 else abs(math.degrees(math.atan2(abs(v[0]), abs(v[1]))))
+    spine_score = 25.0 * _huber_like(ang_vert, 20.0*(1.0 + 0.008*yaw_deg))
+    
+    # 4. 팔꿈치 각도 점수 (0-30점)
+    L_ang = _angle_deg_3d((ls[0],ls[1],ls[2]), (le[0],le[1],le[2]), (lw[0],lw[1],lw[2]))
+    R_ang = _angle_deg_3d((rs[0],rs[1],rs[2]), (re[0],re[1],re[2]), (rw[0],rw[1],rw[2]))
+    
+    def elbow_s(a, target=160.0, base_w=25.0):
+        if a is None:
+            return 0.0
+        return _sigmoid_score(a, center=target, width=base_w*(1.0+0.008*yaw_deg), max_score=15.0)
+    
+    L_el = elbow_s(L_ang, target_elbow_deg, width_elbow_sigm)
+    R_el = elbow_s(R_ang, target_elbow_deg, width_elbow_sigm)
+    elbow_score = L_el + R_el
+    
+    # 5. 무릎 각도 체크
+    L_knee = _angle_deg_3d((lh[0],lh[1],lh[2]), (lk[0],lk[1],lk[2]), (la[0],la[1],la[2]))
+    R_knee = _angle_deg_3d((rh[0],rh[1],rh[2]), (rk[0],rk[1],rk[2]), (ra[0],ra[1],ra[2]))
+    
+    L_knee_bad = (L_knee is not None) and (abs(L_knee - target_knee_deg) > allow_knee_deviation)
+    R_knee_bad = (R_knee is not None) and (abs(R_knee - target_knee_deg) > allow_knee_deviation)
+    
+    # 6. Visibility 가중치 적용
+    def gate(score, ok):
+        return score if ok else score*0.15
+    
+    sh_ok = _component_vis_ok([ls[3], rs[3]], thr=0.55, frac=0.65)
+    hp_ok = _component_vis_ok([lh[3], rh[3]], thr=0.55, frac=0.65)
+    sp_ok = _component_vis_ok([ls[3], rs[3], lh[3], rh[3]], thr=0.55, frac=0.65)
+    el_ok = _component_vis_ok([ls[3], le[3], lw[3], rs[3], re[3], rw[3]], thr=0.50, frac=0.55)
+    
+    sh_score = gate(sh_score, sh_ok)
+    hip_score = gate(hip_score, hp_ok)
+    spine_score = gate(spine_score, sp_ok)
+    elbow_score = gate(elbow_score, el_ok)
+    
+    # 7. 전체 가시성 가중치
+    vis_avg = float(np.clip(np.mean([ls[3], rs[3], lh[3], rh[3], le[3], re[3], lw[3], rw[3]]), 0.0, 1.0))
+    visibility_weight = float(np.clip(0.6 + 0.35*vis_avg, 0.6, 0.95))
+    
+    # 8. 총점 계산
+    total = (sh_score + hip_score + spine_score + elbow_score) * visibility_weight
+    total = max(0.0, min(100.0, total))
+    
+    # 9. 오류 플래그 및 코드
+    left_arm_bad = False
+    right_arm_bad = False
+    left_leg_bad = False
+    right_leg_bad = False
+    
+    if min_elbow_score > 0:
+        if L_el < min_elbow_score:
+            left_arm_bad = True
+        if R_el < min_elbow_score:
+            right_arm_bad = True
+    
+    left_leg_bad = L_knee_bad
+    right_leg_bad = R_knee_bad
+    
+    # 10. 오류 코드 생성
+    error_codes = []
+    if left_arm_bad:
+        error_codes.append(1)
+    if right_arm_bad:
+        error_codes.append(2)
+    if left_leg_bad:
+        error_codes.append(3)
+    if right_leg_bad:
+        error_codes.append(4)
+    
+    # 11. 힌트 메시지
+    hints = []
+    if left_arm_bad:
+        hints.append("왼팔(팔꿈치 각도) 교정 필요")
+    if right_arm_bad:
+        hints.append("오른팔(팔꿈치 각도) 교정 필요")
+    if left_leg_bad:
+        hints.append("왼쪽 무릎 각도 교정 필요")
+    if right_leg_bad:
+        hints.append("오른쪽 무릎 각도 교정 필요")
+    
+    THRESH_SHOULDERS_ERR = 0.05
+    THRESH_HIPS_ERR = 0.07
+    THRESH_SPINE_ANGLE = 20.0
+    
+    if shoulders_err > THRESH_SHOULDERS_ERR * 1.2:
+        hints.append("어깨를 수평으로 유지하세요")
+    if hips_err > THRESH_HIPS_ERR * 1.2:
+        hints.append("골반을 수평으로 유지하세요")
+    if ang_vert > THRESH_SPINE_ANGLE * 1.2:
+        hints.append("상체를 똑바로 세우세요")
+    
+    # 12. 컴포넌트별 점수
+    comps = {
+        "shoulders_level": round(sh_score, 2),
+        "hips_level": round(hip_score, 2),
+        "spine_vertical": round(spine_score, 2),
+        "elbows_angle": round(elbow_score, 2),
+    }
+    
+    return {
+        "score": round(total, 1),
+        "components": comps,
+        "visibility_weight": round(visibility_weight, 3),
+        "errorCodes": error_codes,
+        "hints": hints,
+        "exercise_code": used_params
+    }
 
+    # 운동 코드 매핑 (DB 숫자 → 파라미터 이름)
+EXERCISE_CODE_MAPPING = {
+    "001": "squat",      # 스쿼트
+    "002": "lunge",      # 런지
+    "003": "pushup",     # 푸시업
+    "004": "plank",      # 플랭크
+    "005": "standing",   # 체어 딥스 (기본 자세)
+    "006": "standing",   # 마운틴 클라이머 (기본 자세)
+}
 
+# ================== API 엔드포인트 ==================
 @app.post("/api/analyze-pose")
 async def analyze_pose(request: PoseAnalysisRequest):
-    """프레임 이미지를 받아서 포즈 분석 결과 반환"""
     try:
-        # base64 디코딩
+        # 받은 exercise_code 로깅
+        exercise_code = EXERCISE_CODE_MAPPING.get(request.exercise_code, "standing")
+        print(f"🔍 받은 exercise_code: '{request.exercise_code}' → 변환: '{exercise_code}'")
+        
         image_data = base64.b64decode(request.image.split(',')[1] if ',' in request.image else request.image)
         nparr = np.frombuffer(image_data, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
-        # BGR to RGB
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        # MediaPipe 포즈 분석
         results = pose.process(image_rgb)
         
         if not results.pose_landmarks:
-            return JSONResponse(content={
-                "success": False,
-                "message": "No pose detected"
-            })
+            return JSONResponse(content={"success": False, "message": "No pose detected"})
         
-        # 랜드마크 추출
         landmarks = []
         for landmark in results.pose_landmarks.landmark:
             landmarks.append({
@@ -599,8 +347,46 @@ async def analyze_pose(request: PoseAnalysisRequest):
                 "visibility": landmark.visibility
             })
         
-        # 포즈 분석 (서있기 기준)
-        analysis = analyze_standing_pose(landmarks, image.shape[1], image.shape[0])
+        required_landmarks = [0, 11, 12, 23, 24]
+        min_visibility = 0.5
+        
+        missing_parts = []
+        for idx in required_landmarks:
+            if landmarks[idx]['visibility'] < min_visibility:
+                missing_parts.append(idx)
+        
+        if missing_parts:
+            part_names = {
+                0: "얼굴",
+                11: "왼쪽 어깨",
+                12: "오른쪽 어깨",
+                23: "왼쪽 골반",
+                24: "오른쪽 골반"
+            }
+            missing_names = [part_names.get(idx, f"부위{idx}") for idx in missing_parts]
+            
+            return JSONResponse(content={
+                "success": True,
+                "landmarks": landmarks,
+                "analysis": {
+                    "score": 0,
+                    "components": {
+                        "shoulders_level": 0,
+                        "hips_level": 0,
+                        "spine_vertical": 0,
+                        "elbows_angle": 0
+                    },
+                    "visibility_weight": 0,
+                    "errorCodes": [],
+                    "hints": [
+                        f"카메라에서 {', '.join(missing_names)}이(가) 보이지 않습니다",
+                        "전신이 보이도록 카메라 위치를 조정해주세요"
+                    ]
+                }
+            })
+        
+        analysis = score_pose_components(landmarks, exercise_code)
+        print(f"✅ 사용한 파라미터: '{analysis['exercise_code']}'")
         
         return JSONResponse(content={
             "success": True,
@@ -609,128 +395,19 @@ async def analyze_pose(request: PoseAnalysisRequest):
         })
         
     except Exception as e:
+        print(f"❌ 오류 발생: {str(e)}")
         return JSONResponse(content={
             "success": False,
             "message": str(e)
         }, status_code=500)
 
-
-def analyze_standing_pose(landmarks, width, height):
-    """서있기 자세 분석"""
-    # 주요 랜드마크 인덱스
-    LS, RS = 11, 12  # 어깨
-    LE, RE = 13, 14  # 팔꿈치
-    LW, RW = 15, 16  # 손목
-    LH, RH = 23, 24  # 골반
-    LK, RK = 25, 26  # 무릎
-    LA, RA = 27, 28  # 발목
-    
-    def get_point(idx):
-        lm = landmarks[idx]
-        return {
-            'x': lm['x'] * width,
-            'y': lm['y'] * height,
-            'v': lm['visibility']
-        }
-    
-    def distance(p1, p2):
-        return np.sqrt((p1['x'] - p2['x'])**2 + (p1['y'] - p2['y'])**2)
-    
-    def angle_deg(a, b, c):
-        """3점으로 각도 계산 (b가 중심점)"""
-        ba = np.array([a['x'] - b['x'], a['y'] - b['y']])
-        bc = np.array([c['x'] - b['x'], c['y'] - b['y']])
-        
-        cosine = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
-        cosine = np.clip(cosine, -1.0, 1.0)
-        angle = np.arccos(cosine)
-        return np.degrees(angle)
-    
-    # 포인트 가져오기
-    ls, rs = get_point(LS), get_point(RS)
-    le, re = get_point(LE), get_point(RE)
-    lw, rw = get_point(LW), get_point(RW)
-    lh, rh = get_point(LH), get_point(RH)
-    lk, rk = get_point(LK), get_point(RK)
-    la, ra = get_point(LA), get_point(RA)
-    
-    # 중심점
-    mid_sh = {'x': (ls['x'] + rs['x'])/2, 'y': (ls['y'] + rs['y'])/2}
-    mid_hp = {'x': (lh['x'] + rh['x'])/2, 'y': (lh['y'] + rh['y'])/2}
-    
-    # 스케일 계산
-    shoulder_w = distance(ls, rs)
-    torso = distance(mid_sh, mid_hp)
-    scale = max(1e-6, 0.5 * (shoulder_w + torso))
-    
-    # 1. 어깨 수평 (0-25점)
-    shoulders_err = abs(ls['y'] - rs['y']) / scale
-    shoulders_score = 25 if shoulders_err < 0.08 else max(0, 25 * (1 - shoulders_err / 0.16))
-    
-    # 2. 골반 수평 (0-25점)
-    hips_err = abs(lh['y'] - rh['y']) / scale
-    hips_score = 25 if hips_err < 0.10 else max(0, 25 * (1 - hips_err / 0.20))
-    
-    # 3. 척추 수직 (0-25점)
-    spine_angle = abs(np.degrees(np.arctan2(abs(mid_sh['x'] - mid_hp['x']), abs(mid_sh['y'] - mid_hp['y']))))
-    spine_score = 25 if spine_angle < 30 else max(0, 25 * (1 - spine_angle / 60))
-    
-    # 4. 팔꿈치 각도 (0-25점)
-    left_elbow = angle_deg(ls, le, lw)
-    right_elbow = angle_deg(rs, re, rw)
-    elbow_target = 160
-    left_elbow_score = max(0, 12.5 * (1 - abs(left_elbow - elbow_target) / 40))
-    right_elbow_score = max(0, 12.5 * (1 - abs(right_elbow - elbow_target) / 40))
-    elbows_score = left_elbow_score + right_elbow_score
-    
-    # 5. 무릎 각도
-    left_knee = angle_deg(lh, lk, la)
-    right_knee = angle_deg(rh, rk, ra)
-    knee_target = 175
-    left_knee_bad = abs(left_knee - knee_target) > 20
-    right_knee_bad = abs(right_knee - knee_target) > 20
-    
-    # 종합 점수
-    total_score = shoulders_score + hips_score + spine_score + elbows_score
-    total_score = min(100, max(0, total_score))
-    
-    # 오류 코드
-    error_codes = []
-    hints = []
-    
-    if left_elbow_score < 6:
-        error_codes.append(1)
-        hints.append("왼팔(팔꿈치 각도) 교정 필요")
-    if right_elbow_score < 6:
-        error_codes.append(2)
-        hints.append("오른팔(팔꿈치 각도) 교정 필요")
-    if left_knee_bad:
-        error_codes.append(3)
-        hints.append("왼쪽 무릎 각도 교정 필요")
-    if right_knee_bad:
-        error_codes.append(4)
-        hints.append("오른쪽 무릎 각도 교정 필요")
-    
-    return {
-        "score": round(total_score, 1),
-        "shoulders": round(shoulders_score),
-        "hips": round(hips_score),
-        "spine": round(spine_score),
-        "elbows": round(elbows_score),
-        "errorCodes": error_codes,
-        "hints": hints
-    }
-
-
 @app.get("/")
 async def root():
-    return {"message": "FITAI Backend API", "version": "1.0"}
-
+    return {"message": "FITAI Backend API", "version": "3.0 - Enhanced Scoring"}
 
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
-
 
 if __name__ == "__main__":
     import uvicorn
