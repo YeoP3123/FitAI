@@ -7,6 +7,9 @@ import cv2
 import numpy as np
 import mediapipe as mp
 import math
+import boto3
+import json
+import time
 
 app = FastAPI()
 
@@ -18,6 +21,45 @@ pose = mp_pose.Pose(
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5
 )
+
+# ============= 왼팔 IoT 기능 추가 =============
+# AWS IoT Core 클라이언트
+iot_client = boto3.client('iot-data', region_name='ap-northeast-2')
+
+# 왼팔 오류 쿨다운 관리
+last_left_arm_error = 0
+COOLDOWN_SECONDS = 2.0
+
+def send_left_arm_alert():
+    """왼팔 오류 시 ESP32로 알림 전송"""
+    global last_left_arm_error
+    
+    current_time = time.time()
+    if current_time - last_left_arm_error < COOLDOWN_SECONDS:
+        return False
+    
+    last_left_arm_error = current_time
+    
+    try:
+        message = {
+            "action": "left_arm_error",
+            "timestamp": time.time(),
+            "message": "왼팔 자세 교정 필요"
+        }
+        
+        response = iot_client.publish(
+            topic='esp32/buzzer/control',
+            qos=1,
+            payload=json.dumps(message)
+        )
+        
+        print("✅ 왼팔 교정 알림 전송 완료")
+        return True
+        
+    except Exception as e:
+        print(f"❌ ESP32 알림 전송 실패: {e}")
+        return False
+# ============= 왼팔 IoT 기능 추가 끝 =============
 
 class PoseAnalysisRequest(BaseModel):
     image: str
@@ -388,6 +430,12 @@ async def analyze_pose(request: PoseAnalysisRequest):
         analysis = score_pose_components(landmarks, exercise_code)
         print(f"✅ 사용한 파라미터: '{analysis['exercise_code']}'")
         
+        # ============= 왼팔 오류 감지 시 ESP32 신호 전송 =============
+        if 1 in analysis["errorCodes"]:  # 오류코드 1 = 왼팔
+            send_left_arm_alert()
+            print(f"🚨 왼팔 오류 감지 - ESP32 신호 전송")
+        # ============= 왼팔 IoT 처리 끝 =============
+        
         return JSONResponse(content={
             "success": True,
             "landmarks": landmarks,
@@ -401,13 +449,37 @@ async def analyze_pose(request: PoseAnalysisRequest):
             "message": str(e)
         }, status_code=500)
 
+# ============= 왼팔 IoT API 엔드포인트 추가 =============
+@app.post("/api/left-arm-alert")
+async def api_left_arm_alert():
+    """왼팔 교정 알림 ESP32 전송"""
+    try:
+        success = send_left_arm_alert()
+        
+        if success:
+            return JSONResponse(content={
+                "success": True,
+                "message": "왼팔 교정 알림 전송 완료"
+            })
+        else:
+            return JSONResponse(content={
+                "success": False,
+                "error": "쿨다운 중이거나 전송 실패"
+            })
+            
+    except Exception as e:
+        return JSONResponse(content={
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
 @app.get("/")
 async def root():
-    return {"message": "FITAI Backend API", "version": "3.0 - Enhanced Scoring"}
+    return {"message": "FITAI Backend API with IoT", "version": "3.0 - Enhanced Scoring + Left Arm IoT"}
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "iot_enabled": True}
 
 if __name__ == "__main__":
     import uvicorn
