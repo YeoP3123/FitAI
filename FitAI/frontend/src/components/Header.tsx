@@ -41,21 +41,15 @@ const Header: React.FC = () => {
 
       {/* 2️⃣ 메뉴 (가운데 - 큰 화면에서만 보임) */}
       <nav className="hidden md:flex items-center space-x-10 text-sm font-medium">
-        <a href="/exercise" className="text-white hover:text-orange-500 transition">
+        <Link to="/exercise" className="text-white hover:text-orange-500 transition">
           운동
-        </a>
-        <a href="#" className="text-white hover:text-orange-500 transition">
-          자세교정
-        </a>
-        <Link
-          to="/community"
-          className="text-white hover:text-orange-500 transition"
-        >
+        </Link>
+        <Link to="/community" className="text-white hover:text-orange-500 transition">
           커뮤니티
         </Link>
-        <a href="/mypagehistory" className="text-white hover:text-orange-500 transition">
+        <Link to="/mypagehistory" className="text-white hover:text-orange-500 transition">
           내 기록
-        </a>
+        </Link>
       </nav>
 
       {/* 3️⃣ 로그인/시작하기 (오른쪽 고정) */}
@@ -63,7 +57,7 @@ const Header: React.FC = () => {
         <div className="hidden md:flex items-center space-x-4">
           <AuthStatus />
           <button
-            onClick={() => (window.location.href = "/start")}
+            onClick={() => (window.location.href = "/exercise")}
             className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-full transition cursor-pointer active:scale-95"
           >
             시작하기
@@ -129,20 +123,13 @@ const Header: React.FC = () => {
 
           {/* 메뉴 항목 */}
           <nav className="flex flex-col space-y-6 text-lg font-medium">
-            <a
-              href="#"
+            <Link
+              to="/exercise"
               onClick={closeMenu}
               className="text-white hover:text-orange-500 transition"
             >
               운동
-            </a>
-            <a
-              href="#"
-              onClick={closeMenu}
-              className="text-white hover:text-orange-500 transition"
-            >
-              자세교정
-            </a>
+            </Link>
             <Link
               to="/community"
               onClick={closeMenu}
@@ -150,13 +137,13 @@ const Header: React.FC = () => {
             >
               커뮤니티
             </Link>
-            <a
-              href="#"
+            <Link
+              to="/mypagehistory"
               onClick={closeMenu}
               className="text-white hover:text-orange-500 transition"
             >
               내 기록
-            </a>
+            </Link>
           </nav>
 
           {/* 로그인 / 시작하기 버튼 */}
@@ -165,7 +152,7 @@ const Header: React.FC = () => {
             <button
               onClick={() => {
                 closeMenu();
-                window.location.href = "/start";
+                window.location.href = "/exercise";
               }}
               className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-full transition cursor-pointer active:scale-95"
             >
