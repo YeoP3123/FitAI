@@ -1,5 +1,9 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import Swal from "sweetalert2";
+import { useAuth } from "react-oidc-context";
+
+const API_BASE = import.meta.env.VITE_API_URL;
 
 interface ExerciseScore {
   exercise_id: string;
@@ -15,65 +19,159 @@ interface Exercise {
   exercise_id: string;
   exercise_name: string;
   exercise_type: string;
+  sets?: number;
+  reps?: number;
+  restTime?: number;
 }
 
 function ExerciseResult() {
   const location = useLocation();
   const navigate = useNavigate();
-  
-  const exerciseScores = location.state?.exerciseScores as ExerciseScore[] || [];
-  const selectedExercises = location.state?.selectedExercises as Exercise[] || [];
+  const auth = useAuth();
 
+  const user = auth.user?.profile;
+  const userId = user?.sub;
+
+  const [exerciseScores, setExerciseScores] = useState<ExerciseScore[]>([]);
+  const [selectedExercises, setSelectedExercises] = useState<Exercise[]>([]);
+  const startTime = location.state?.startTime || Date.now(); // ✅ 운동 시작 시간 복원
+
+  // ✅ 새로고침 복원
   useEffect(() => {
-    if (exerciseScores.length === 0) {
-      navigate('/exercise');
-    }
-  }, [exerciseScores, navigate]);
+    const stateScores = location.state?.exerciseScores;
+    const stateExercises = location.state?.selectedExercises;
 
-  // 평균 계산 함수
+    if (stateScores && stateExercises) {
+      setExerciseScores(stateScores);
+      setSelectedExercises(stateExercises);
+      sessionStorage.setItem(
+        "exerciseResult",
+        JSON.stringify({
+          exerciseScores: stateScores,
+          selectedExercises: stateExercises,
+          startTime: startTime,
+        })
+      );
+    } else {
+      const saved = sessionStorage.getItem("exerciseResult");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setExerciseScores(parsed.exerciseScores || []);
+        setSelectedExercises(parsed.selectedExercises || []);
+      } else {
+        navigate("/exercise");
+      }
+    }
+  }, [location.state, navigate, startTime]);
+
+  // ✅ 평균 계산
   const calculateAverage = (scores: number[]) => {
-    if (scores.length === 0) return 0;
+    if (!scores || scores.length === 0) return 0;
     return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
   };
 
-  // 전체 통계 계산
-  const overallStats = {
-    totalScore: calculateAverage(exerciseScores.flatMap(e => e.scores)),
-    avgShoulders: calculateAverage(exerciseScores.flatMap(e => e.shouldersScores)),
-    avgHips: calculateAverage(exerciseScores.flatMap(e => e.hipsScores)),
-    avgSpine: calculateAverage(exerciseScores.flatMap(e => e.spineScores)),
-    avgElbows: calculateAverage(exerciseScores.flatMap(e => e.elbowsScores)),
+  // ✅ 세션 저장
+  const saveSession = async (totalScore: number) => {
+    try {
+      const endTime = Date.now();
+      const sessionData = {
+        session_id: `S${Date.now()}`,
+        user_id: userId,
+        session_start: new Date(startTime).toISOString(),
+        session_end: new Date(endTime).toISOString(),
+        session_score: totalScore,
+        session_note: "",
+        exercises: selectedExercises.map((ex, index) => ({
+          exercise_order: index + 1, // ✅ 수행 순서
+          exercise_id: ex.exercise_id,
+          exercise_name: ex.exercise_name,
+          exercise_type: ex.exercise_type,
+          exercise_sets: ex.sets || 0,
+          exercise_reps: ex.reps || 0,
+          exercise_rest_time: ex.restTime || 0,
+          average_score:
+            exerciseScores.length > 0
+              ? calculateAverage(
+                  exerciseScores.find((s) => s.exercise_id === ex.exercise_id)
+                    ?.scores || []
+                )
+              : 0,
+        })),
+        feedbacks: exerciseScores.map((ex) => ({
+          exercise_id: ex.exercise_id,
+          lost_score: 100 - calculateAverage(ex.scores),
+          feedback_text: `평균 ${calculateAverage(ex.scores)}점`,
+        })),
+      };
+
+      const res = await fetch(`${API_BASE}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sessionData),
+      });
+
+      const result = await res.json();
+
+      if (result.success) {
+        Swal.fire({
+          icon: "success",
+          title: "운동 기록 저장 완료!",
+          text:
+            exerciseScores.length > 0
+              ? `평균 점수: ${totalScore}점`
+              : "AI 분석 없이 기록이 저장되었습니다.",
+          confirmButtonText: "확인",
+          confirmButtonColor: "#f97316",
+        });
+      } else {
+        throw new Error(result.error || "저장 실패");
+      }
+    } catch (err: any) {
+      console.error("❌ 세션 저장 실패:", err);
+      Swal.fire({
+        icon: "error",
+        title: "기록 저장 실패",
+        text: err.message || "네트워크 오류가 발생했습니다.",
+      });
+    }
   };
 
-  // 최고/최저 부위 찾기
-  const bodyParts = [
-    { name: '어깨', score: overallStats.avgShoulders, icon: '💪' },
-    { name: '골반', score: overallStats.avgHips, icon: '🦴' },
-    { name: '척추', score: overallStats.avgSpine, icon: '🎯' },
-    { name: '팔', score: overallStats.avgElbows, icon: '💪' },
-  ];
+  // ✅ 전체 점수 계산
+  const overallStats = {
+    totalScore: calculateAverage(exerciseScores.flatMap((e) => e.scores || [])),
+  };
 
-  const bestPart = bodyParts.reduce((prev, current) => 
-    current.score > prev.score ? current : prev
-  );
-
-  const worstPart = bodyParts.reduce((prev, current) => 
-    current.score < prev.score ? current : prev
-  );
-
-  // 점수 색상
+  // ✅ 색상 함수
   const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-400';
-    if (score >= 60) return 'text-yellow-400';
-    return 'text-red-400';
+    if (score >= 80) return "text-green-400";
+    if (score >= 60) return "text-yellow-400";
+    return "text-red-400";
   };
 
   const getScoreBgColor = (score: number) => {
-    if (score >= 80) return 'bg-green-500/20 border-green-500';
-    if (score >= 60) return 'bg-yellow-500/20 border-yellow-500';
-    return 'bg-red-500/20 border-red-500';
+    if (score >= 80) return "bg-green-500/20 border-green-500";
+    if (score >= 60) return "bg-yellow-500/20 border-yellow-500";
+    return "bg-red-500/20 border-red-500";
   };
 
+  // ✅ 페이지 진입 시 자동 저장
+  useEffect(() => {
+    if (selectedExercises.length > 0) {
+      const totalScore =
+        exerciseScores.length > 0
+          ? calculateAverage(exerciseScores.flatMap((e) => e.scores))
+          : 0;
+      saveSession(totalScore);
+    }
+  }, [exerciseScores, selectedExercises]);
+
+  // ✅ 운동 시간 계산
+  const totalMinutes = Math.max(
+    Math.round((Date.now() - startTime) / 60000),
+    1
+  );
+
+  // ✅ 렌더링
   return (
     <div className="bg-[#1E1F23] text-white min-h-screen">
       {/* 헤더 */}
@@ -87,7 +185,7 @@ function ExerciseResult() {
               <h1 className="text-xl font-bold">운동 결과</h1>
             </div>
             <button
-              onClick={() => navigate('/exercise')}
+              onClick={() => navigate("/exercise")}
               className="bg-orange-500 hover:bg-orange-600 px-4 py-2 rounded-lg font-semibold transition"
             >
               운동 선택으로
@@ -96,143 +194,112 @@ function ExerciseResult() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* 축하 메시지 */}
-        <div className="text-center mb-8">
+      {/* 본문 */}
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="text-center mb-10">
           <div className="text-6xl mb-4">🎉</div>
           <h2 className="text-3xl font-bold mb-2">운동 완료!</h2>
-          <p className="text-gray-400">총 {selectedExercises.length}개의 운동을 완료했습니다</p>
+          <p className="text-gray-400">
+            총 {selectedExercises.length}개의 운동을 완료했습니다 <br />
+            (소요 시간: 약 {totalMinutes}분)
+          </p>
         </div>
 
-        {/* 전체 점수 카드 */}
-        <div className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/50 rounded-2xl p-8 mb-8 text-center">
-          <p className="text-gray-400 mb-2">전체 평균 점수</p>
-          <div className={`text-7xl font-bold ${getScoreColor(overallStats.totalScore)}`}>
-            {overallStats.totalScore}
-          </div>
-          <p className="text-gray-400 mt-2">/ 100</p>
-        </div>
+        {/* ✅ 운동 순서 기반 요약 */}
+        <div className="bg-[#2A2B30] rounded-2xl p-6 mb-10">
+          <h3 className="text-2xl font-bold mb-6 text-center text-orange-400">
+            운동 순서 및 결과
+          </h3>
 
-        {/* 최고/최저 부위 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <div className="bg-green-500/10 border border-green-500 rounded-xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="text-4xl">{bestPart.icon}</div>
-              <div>
-                <p className="text-sm text-gray-400">가장 잘한 부위</p>
-                <p className="text-2xl font-bold text-green-400">{bestPart.name}</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <span className="text-3xl font-bold text-green-400">{bestPart.score}</span>
-              <span className="text-gray-400 ml-2">/ 25</span>
-            </div>
-          </div>
-
-          <div className="bg-red-500/10 border border-red-500 rounded-xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="text-4xl">{worstPart.icon}</div>
-              <div>
-                <p className="text-sm text-gray-400">개선이 필요한 부위</p>
-                <p className="text-2xl font-bold text-red-400">{worstPart.name}</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <span className="text-3xl font-bold text-red-400">{worstPart.score}</span>
-              <span className="text-gray-400 ml-2">/ 25</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 부위별 점수 */}
-        <div className="bg-[#2A2B30] rounded-xl p-6 mb-8">
-          <h3 className="text-xl font-bold mb-6">부위별 평균 점수</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {bodyParts.map((part) => (
-              <div key={part.name} className="text-center">
-                <div className="text-3xl mb-2">{part.icon}</div>
-                <p className="text-sm text-gray-400 mb-1">{part.name}</p>
-                <div className={`text-2xl font-bold ${getScoreColor(part.score)}`}>
-                  {part.score}
-                </div>
-                <div className="w-full bg-gray-700 rounded-full h-2 mt-2">
-                  <div
-                    className={`h-full rounded-full ${
-                      part.score >= 20 ? 'bg-green-500' :
-                      part.score >= 15 ? 'bg-yellow-500' : 'bg-red-500'
-                    }`}
-                    style={{ width: `${(part.score / 25) * 100}%` }}
-                  ></div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* 운동별 상세 결과 */}
-        <div className="bg-[#2A2B30] rounded-xl p-6">
-          <h3 className="text-xl font-bold mb-6">운동별 상세 결과</h3>
-          <div className="space-y-4">
-            {exerciseScores.map((exercise) => {
-              const avgScore = calculateAverage(exercise.scores);
-              const avgShoulders = calculateAverage(exercise.shouldersScores);
-              const avgHips = calculateAverage(exercise.hipsScores);
-              const avgSpine = calculateAverage(exercise.spineScores);
-              const avgElbows = calculateAverage(exercise.elbowsScores);
+          <div className="flex flex-col gap-4">
+            {selectedExercises.map((ex, index) => {
+              const found = exerciseScores.find(
+                (s) => s.exercise_id === ex.exercise_id
+              );
+              const avgScore = found ? calculateAverage(found.scores) : null;
+              const hasAI = found && found.scores && found.scores.length > 0;
 
               return (
                 <div
-                  key={exercise.exercise_id}
-                  className={`border rounded-lg p-5 ${getScoreBgColor(avgScore)}`}
+                  key={ex.exercise_id}
+                  className={`flex flex-col sm:flex-row justify-between items-start sm:items-center border rounded-xl p-5 transition ${
+                    hasAI
+                      ? getScoreBgColor(avgScore || 0)
+                      : "bg-[#26272B] border-gray-600"
+                  }`}
                 >
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-lg font-bold">{exercise.exercise_name}</h4>
+                  {/* 왼쪽: 순서 + 운동명 */}
+                  <div className="flex items-center gap-3 mb-3 sm:mb-0">
+                    <div className="w-8 h-8 flex items-center justify-center bg-orange-500 text-white rounded-full font-bold">
+                      {index + 1}
+                    </div>
+                    <div>
+                      <h4 className="text-lg font-semibold">{ex.exercise_name}</h4>
+                      <p className="text-gray-400 text-sm">
+                        세트:{" "}
+                        <span className="text-orange-400 font-semibold">
+                          {ex.sets || 0}
+                        </span>{" "}
+                        | 반복:{" "}
+                        <span className="text-orange-400 font-semibold">
+                          {ex.reps || 0}
+                        </span>{" "}
+                        | 휴식:{" "}
+                        <span className="text-orange-400 font-semibold">
+                          {ex.restTime || 0}초
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 오른쪽: 점수 */}
+                  {hasAI ? (
                     <div className="text-right">
-                      <span className={`text-3xl font-bold ${getScoreColor(avgScore)}`}>
+                      <p
+                        className={`text-3xl font-bold ${getScoreColor(
+                          avgScore || 0
+                        )}`}
+                      >
                         {avgScore}
-                      </span>
-                      <span className="text-gray-400 text-sm ml-1">점</span>
+                      </p>
+                      <p className="text-gray-400 text-xs mt-1">AI 분석 점수</p>
                     </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                    <div className="bg-black/20 rounded-lg p-3">
-                      <p className="text-gray-400 mb-1">어깨</p>
-                      <p className="font-bold text-lg">{avgShoulders}</p>
-                    </div>
-                    <div className="bg-black/20 rounded-lg p-3">
-                      <p className="text-gray-400 mb-1">골반</p>
-                      <p className="font-bold text-lg">{avgHips}</p>
-                    </div>
-                    <div className="bg-black/20 rounded-lg p-3">
-                      <p className="text-gray-400 mb-1">척추</p>
-                      <p className="font-bold text-lg">{avgSpine}</p>
-                    </div>
-                    <div className="bg-black/20 rounded-lg p-3">
-                      <p className="text-gray-400 mb-1">팔</p>
-                      <p className="font-bold text-lg">{avgElbows}</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 text-xs text-gray-400">
-                    총 {exercise.scores.length}회 측정
-                  </div>
+                  ) : (
+                    <p className="text-gray-400 text-sm italic">
+                      AI 분석 미적용
+                    </p>
+                  )}
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* 하단 버튼 */}
+        {/* ✅ 전체 평균 점수 */}
+        {exerciseScores.length > 0 && (
+          <div className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/50 rounded-2xl p-8 mb-10 text-center">
+            <p className="text-gray-400 mb-2">전체 평균 점수</p>
+            <div
+              className={`text-7xl font-bold ${getScoreColor(
+                overallStats.totalScore
+              )}`}
+            >
+              {overallStats.totalScore}
+            </div>
+            <p className="text-gray-400 mt-2">/ 100</p>
+          </div>
+        )}
+
+        {/* ✅ 하단 버튼 */}
         <div className="flex gap-4 mt-8">
           <button
-            onClick={() => navigate('/mypage')}
+            onClick={() => navigate("/MyPageHistory")}
             className="flex-1 bg-gray-600 hover:bg-gray-500 text-white py-4 rounded-xl font-semibold transition"
           >
-            마이페이지
+            운동 기록 보기
           </button>
           <button
-            onClick={() => navigate('/exercise')}
+            onClick={() => navigate("/exercise")}
             className="flex-1 bg-gradient-to-r from-orange-500 to-red-500 hover:opacity-90 text-white py-4 rounded-xl font-semibold transition shadow-lg"
           >
             새로운 운동 시작
