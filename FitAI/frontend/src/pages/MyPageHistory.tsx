@@ -21,9 +21,9 @@ interface ExerciseItem {
   exercise_id: string;
   exercise_name: string;
   exercise_type?: string;
-  exercise_sets?: number; // ✅ 세트 수
-  exercise_reps?: number; // ✅ 반복 횟수
-  average_score?: number; // ✅ 평균 점수
+  exercise_sets?: number;
+  exercise_reps?: number;
+  average_score?: number;
 }
 
 interface Session {
@@ -88,7 +88,6 @@ const MyPageHistory: React.FC = () => {
     }
   };
 
-  // ✅ 날짜 포맷
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleString("ko-KR", {
@@ -103,7 +102,7 @@ const MyPageHistory: React.FC = () => {
   const calculateDuration = (start: string, end: string) => {
     const startTime = new Date(start).getTime();
     const endTime = new Date(end).getTime();
-    const minutes = Math.max(Math.round((endTime - startTime) / 1000 / 60), 1);
+    const minutes = Math.max(Math.round((endTime - startTime) / 60000), 1);
     return minutes;
   };
 
@@ -113,9 +112,10 @@ const MyPageHistory: React.FC = () => {
     return "text-red-400";
   };
 
-  const getScoreBgColor = (score: number) => {
-    if (score >= 80) return "border-green-500/50";
-    if (score >= 60) return "border-yellow-500/50";
+  const getScoreBgColor = (score: number | null, isAIUsed: boolean) => {
+    if (!isAIUsed) return "border-gray-600";
+    if (score && score >= 80) return "border-green-500/50";
+    if (score && score >= 60) return "border-yellow-500/50";
     return "border-red-500/50";
   };
 
@@ -144,7 +144,7 @@ const MyPageHistory: React.FC = () => {
       </main>
     );
 
-  // ✅ 메인
+  // ✅ 메인 UI
   return (
     <main className="bg-[#1E1F23] text-white min-h-screen pt-24 pb-12">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -175,23 +175,25 @@ const MyPageHistory: React.FC = () => {
                   new Date(a.session_start).getTime()
               )
               .map((session, idx) => {
-                const score = session.session_score || 0;
+                const isAIUsed = !!(
+                  session.feedbacks && session.feedbacks.length > 0
+                );
+                const score = isAIUsed ? session.session_score || 0 : null;
                 const duration = calculateDuration(
                   session.session_start,
                   session.session_end
                 );
-                const isAIUsed =
-                  session.feedbacks && session.feedbacks.length > 0;
 
                 return (
                   <div
                     key={idx}
                     className={`border ${getScoreBgColor(
-                      score
-                    )} bg-[#2A2B30] p-6 cursor-pointer hover:bg-[#323338] transition`}
+                      score,
+                      isAIUsed
+                    )} bg-[#2A2B30] p-6 cursor-pointer hover:bg-[#323338] transition rounded-2xl shadow-md`}
                     onClick={() => setSelectedSession(session)}
                   >
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
                       <div>
                         <p className="text-sm text-gray-400">
                           {formatDate(session.session_start)}
@@ -200,18 +202,29 @@ const MyPageHistory: React.FC = () => {
                           운동 시간: {duration}분
                         </p>
                       </div>
-                      <div className="text-right">
-                        <span
-                          className={`text-4xl font-bold ${getScoreColor(
-                            score
-                          )}`}
-                        >
-                          {score}
-                        </span>
-                        <span className="text-gray-400 text-sm ml-1">점</span>
+                      <div className="text-right mt-3 sm:mt-0">
+                        {isAIUsed ? (
+                          <>
+                            <span
+                              className={`text-4xl font-bold ${getScoreColor(
+                                score || 0
+                              )}`}
+                            >
+                              {score}
+                            </span>
+                            <span className="text-gray-400 text-sm ml-1">
+                              점
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-gray-500 text-sm italic">
+                            AI 분석 미적용
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="text-xs mb-3">
+
+                    <div className="text-xs mt-2 mb-3">
                       {isAIUsed ? (
                         <span className="text-green-400">🤖 AI 분석 적용</span>
                       ) : (
@@ -221,17 +234,40 @@ const MyPageHistory: React.FC = () => {
 
                     {session.exercises && session.exercises.length > 0 && (
                       <div>
-                        <p className="text-xs font-semibold text-gray-400 mb-2">
-                          수행한 운동:
+                        <p className="text-sm font-semibold text-gray-400 mb-2">
+                          수행한 운동
                         </p>
-                        <div className="flex flex-wrap gap-2 text-sm">
+                        <div className="grid sm:grid-cols-2 gap-3">
                           {session.exercises.map((ex, i) => (
-                            <span
+                            <div
                               key={i}
-                              className="bg-black/20 border border-gray-600 px-3 py-1"
+                              className="bg-[#1E1F23] border border-gray-700 rounded-xl p-3 flex justify-between items-center"
                             >
-                              {ex.exercise_name}
-                            </span>
+                              <div>
+                                <p className="font-semibold text-sm">
+                                  {i + 1}. {ex.exercise_name}
+                                </p>
+                                <p className="text-xs text-gray-400">
+                                  세트: {ex.exercise_sets || 0} | 반복:{" "}
+                                  {ex.exercise_reps || 0}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                {isAIUsed ? (
+                                  <span
+                                    className={`text-sm font-bold ${getScoreColor(
+                                      ex.average_score || 0
+                                    )}`}
+                                  >
+                                    {ex.average_score ?? "-"}점
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-500 text-xs italic">
+                                    AI 미적용
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -245,15 +281,15 @@ const MyPageHistory: React.FC = () => {
 
       {/* ✅ 상세 모달 */}
       {selectedSession && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-[#2A2B30] border border-gray-700 w-[95%] max-w-4xl p-6 relative rounded-xl overflow-y-auto max-h-[90vh]">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
+          <div className="bg-[#2A2B30] border border-gray-700 w-full max-w-4xl p-6 relative rounded-2xl overflow-y-auto max-h-[90vh]">
             <button
               onClick={closeModal}
               className="absolute top-3 right-4 text-gray-400 hover:text-white text-xl"
             >
               ✖
             </button>
-            <h3 className="text-2xl font-bold mb-4">
+            <h3 className="text-2xl font-bold mb-4 text-orange-400">
               운동 세션 상세 ({formatDate(selectedSession.session_start)})
             </h3>
 
@@ -300,27 +336,38 @@ const MyPageHistory: React.FC = () => {
                   return (
                     <div
                       key={i}
-                      className="border border-gray-700 bg-black/20 rounded-lg p-4"
+                      className="border border-gray-700 bg-[#1E1F23] rounded-xl p-4"
                     >
                       <div className="flex flex-wrap justify-between items-center">
                         <div>
                           <p className="font-semibold text-lg">
-                            {ex.exercise_name}
+                            {i + 1}. {ex.exercise_name}
                           </p>
                           <p className="text-xs text-gray-400">
-                            세트: {ex.exercise_sets || "-"}회 / 반복:{" "}
-                            {ex.exercise_reps || "-"}회
+                            세트: {ex.exercise_sets || "-"} / 반복:{" "}
+                            {ex.exercise_reps || "-"}
                           </p>
                         </div>
                         <div className="text-right">
-                          <span
-                            className={`text-3xl font-bold ${getScoreColor(
-                              ex.average_score || 0
-                            )}`}
-                          >
-                            {ex.average_score ?? "-"}
-                          </span>
-                          <span className="text-sm text-gray-400 ml-1">점</span>
+                          {selectedSession.feedbacks &&
+                          selectedSession.feedbacks.length > 0 ? (
+                            <>
+                              <span
+                                className={`text-3xl font-bold ${getScoreColor(
+                                  ex.average_score || 0
+                                )}`}
+                              >
+                                {ex.average_score ?? "-"}
+                              </span>
+                              <span className="text-sm text-gray-400 ml-1">
+                                점
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-gray-500 italic">
+                              AI 미적용
+                            </span>
+                          )}
                         </div>
                       </div>
 
