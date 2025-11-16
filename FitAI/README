@@ -1,3 +1,13 @@
 // SHIFT + ALT + F = 코드 자동 정렬 단축키
 // ctrl + shift + p -> Delete branch = 브랜치 삭제
 // py -3.13 -m uvicorn main:app --reload --port 8000
+
+// .\venv\Scripts\Activate.ps1 = 가상환경 실행
+// python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 = 백엔드에서 실행
+
+// Remove-Item -Recurse -Force venv
+// py -3.11 -m venv venv
+// .\venv\Scripts\Activate.ps1
+// python -m pip install --upgrade pip
+// pip install fastapi==0.109.0 uvicorn==0.27.0 pydantic==2.5.3 python-multipart opencv-python mediapipe numpy
+// python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
