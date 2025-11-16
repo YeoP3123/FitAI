@@ -1,7 +1,10 @@
 "use client";
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
 const Home: React.FC = () => {
+  const navigate = useNavigate();
+
   return (
     <div className="bg-[#1E1F23] text-white font-['Inter']">
       {/* Hero Section */}
@@ -18,19 +21,17 @@ const Home: React.FC = () => {
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <button className="bg-gradient-to-r from-orange-500 to-red-500 px-10 py-4 rounded-full font-semibold text-lg hover:opacity-90 transition">
+          <button
+            onClick={() => navigate("/exercise")}
+            className="bg-gradient-to-r from-orange-500 to-red-500 px-10 py-4 rounded-full font-semibold text-lg hover:opacity-90 transition"
+          >
             지금 시작하기
-          </button>
-          <button className="border border-gray-600 px-10 py-4 rounded-full font-semibold text-lg hover:bg-white/10 transition">
-            데모 체험하기
           </button>
         </div>
 
         {/* 통계 */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mt-20 max-w-4xl">
+        <div className="grid grid-cols-2 md:grid-cols-2 gap-8 mt-20 max-w-4xl">
           {[
-            { number: "50K+", label: "활성 사용자" },
-            { number: "1M+", label: "완료된 운동" },
             { number: "95%", label: "자세 정확도" },
             { number: "24/7", label: "언제든지" },
           ].map((stat, idx) => (
@@ -55,13 +56,23 @@ const Home: React.FC = () => {
           </p>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-8 max-w-6xl mx-auto">
+        <div className="grid md:grid-cols-1 gap-8 max-w-4xl mx-auto">
           {/* 운동 모드 */}
           <div className="bg-[#2A2B30] p-10 rounded-3xl border border-gray-700 hover:bg-gray-750 transition">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 flex items-center justify-center mb-6">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-16.88 5.85m19.5 1.9c-3.5-.93-6.63-.82-8.94 0-2.58.92-5.01 2.86-7.44 6.32"></path>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-16.88 5.85m19.5 1.9c-3.5-.93-6.63-.82-8.94 0-2.58.92-5.01 2.86-7.44 6.32"></path>
               </svg>
             </div>
             <h3 className="text-2xl font-bold mb-3">운동 모드</h3>
@@ -69,27 +80,11 @@ const Home: React.FC = () => {
               AI가 실시간으로 자세를 분석해 완벽한 운동을 도와드려요.
             </p>
             <div className="flex justify-between items-center">
-              <span className="text-orange-500 font-semibold">12가지 운동</span>
-              <button className="px-6 py-2 bg-white/10 rounded-lg hover:bg-orange-500/30 transition">
-                시작하기
-              </button>
-            </div>
-          </div>
-
-          {/* 자세 교정 */}
-          <div className="bg-[#2A2B30] p-10 rounded-3xl border border-gray-700 hover:bg-gray-750 transition">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center mb-6">
-              <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h3 className="text-2xl font-bold mb-3">자세 교정</h3>
-            <p className="text-gray-300 mb-6">
-              거북목, 굽은 어깨를 AI로 분석하고 맞춤 솔루션을 제공합니다.
-            </p>
-            <div className="flex justify-between items-center">
-              <span className="text-blue-400 font-semibold">24시간 모니터링</span>
-              <button className="px-6 py-2 bg-white/10 rounded-lg hover:bg-blue-500/30 transition">
+              <span className="text-orange-500 font-semibold">6가지 운동</span>
+              <button
+                onClick={() => navigate("/exercise")}
+                className="px-6 py-2 bg-white/10 rounded-lg hover:bg-orange-500/30 transition"
+              >
                 시작하기
               </button>
             </div>
@@ -108,11 +103,11 @@ const Home: React.FC = () => {
             첫 달은 완전 무료입니다.
           </p>
           <div className="flex flex-col sm:flex-row justify-center gap-4">
-            <button className="bg-gradient-to-r from-orange-500 to-red-500 px-10 py-4 rounded-full font-semibold text-lg hover:opacity-90 transition">
+            <button
+              onClick={() => navigate("/exercise")}
+              className="bg-gradient-to-r from-orange-500 to-red-500 px-10 py-4 rounded-full font-semibold text-lg hover:opacity-90 transition"
+            >
               무료로 시작하기
-            </button>
-            <button className="border border-gray-600 px-10 py-4 rounded-full font-semibold text-lg hover:bg-white/10 transition">
-              더 알아보기
             </button>
           </div>
         </div>

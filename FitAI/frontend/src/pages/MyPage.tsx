@@ -40,7 +40,7 @@ const handleLogout = async () => {
   const logoutUri =
     window.location.hostname === "localhost"
       ? "http://localhost:5173/"
-      : "https://main.dka06770r9jf2.amplifyapp.com/";
+      : "https://fitai.duckdns.org/";
   const cognitoDomain =
     "https://ap-northeast-2mzuhxhxiv.auth.ap-northeast-2.amazoncognito.com";
 
