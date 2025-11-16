@@ -103,20 +103,29 @@ function Exercise() {
     setSelectedExercises(newExercises);
   };
 
-  // 설정 모달 열기
-  const openSettings = (exercise: ExerciseWithSettings, index: number) => {
-    setSettingsModal({
-      show: true,
-      exercise: { ...exercise },
-      index,
-    });
-  };
+const openSettings = (exercise: ExerciseWithSettings, index: number) => {
+  setSettingsModal({
+    show: true,
+    exercise: {
+      ...exercise,
+      sets: exercise.sets || 3,
+      reps: exercise.reps || 15,
+      restTime: exercise.restTime || 60,
+    },
+    index,
+  });
+};
+
 
   // 설정 저장
   const saveSettings = () => {
     if (settingsModal.exercise && settingsModal.index !== -1) {
       const newExercises = [...selectedExercises];
-      newExercises[settingsModal.index] = settingsModal.exercise;
+      newExercises[settingsModal.index] = {
+  ...newExercises[settingsModal.index],
+  ...settingsModal.exercise,
+};
+
       setSelectedExercises(newExercises);
       setSettingsModal({ show: false, exercise: null, index: -1 });
     }

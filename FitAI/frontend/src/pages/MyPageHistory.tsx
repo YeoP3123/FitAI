@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { getMySessions } from "../services/api";
+import { useAuth } from "react-oidc-context";
+import Swal from "sweetalert2";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
 
 interface SessionFeedback {
   exercise_id: string;
@@ -7,187 +17,336 @@ interface SessionFeedback {
   feedback_text: string;
 }
 
+interface ExerciseItem {
+  exercise_id: string;
+  exercise_name: string;
+  exercise_type?: string;
+  exercise_sets?: number; // ✅ 세트 수
+  exercise_reps?: number; // ✅ 반복 횟수
+  average_score?: number; // ✅ 평균 점수
+}
+
 interface Session {
-  session_id: string;
+  session_id?: string;
   user_id: string;
   session_start: string;
   session_end: string;
   session_score?: number;
   session_note?: string;
+  exercises?: ExerciseItem[];
   feedbacks?: SessionFeedback[];
 }
 
+const API_BASE = import.meta.env.VITE_API_URL;
+
 const MyPageHistory: React.FC = () => {
+  const auth = useAuth();
+  const accessToken = auth.user?.access_token;
+  const userId = auth.user?.profile?.sub;
+
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
 
   useEffect(() => {
     loadSessions();
   }, []);
 
+  // ✅ 운동 기록 불러오기
   const loadSessions = async () => {
+    if (!accessToken || !userId) {
+      Swal.fire({
+        icon: "warning",
+        title: "로그인이 필요합니다",
+        text: "운동 기록을 확인하려면 로그인해주세요.",
+        confirmButtonColor: "#f97316",
+      });
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
-      const data = await getMySessions();
-      setSessions(data || []);
+
+      const res = await fetch(`${API_BASE}/sessions/user/${userId}`, {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+      const json = await res.json();
+
+      if (json.success) setSessions(json.data || []);
+      else throw new Error(json.message || "운동 기록을 불러올 수 없습니다.");
     } catch (err: any) {
-      console.error("세션 로딩 실패:", err);
+      console.error("❌ 세션 로딩 실패:", err);
       setError(err.message || "운동 기록을 불러올 수 없습니다.");
     } finally {
       setLoading(false);
     }
   };
 
+  // ✅ 날짜 포맷
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleString('ko-KR', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+    return date.toLocaleString("ko-KR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
   const calculateDuration = (start: string, end: string) => {
     const startTime = new Date(start).getTime();
     const endTime = new Date(end).getTime();
-    const minutes = Math.round((endTime - startTime) / 1000 / 60);
+    const minutes = Math.max(Math.round((endTime - startTime) / 1000 / 60), 1);
     return minutes;
   };
 
   const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-400';
-    if (score >= 60) return 'text-yellow-400';
-    return 'text-red-400';
+    if (score >= 80) return "text-green-400";
+    if (score >= 60) return "text-yellow-400";
+    return "text-red-400";
   };
 
   const getScoreBgColor = (score: number) => {
-    if (score >= 80) return 'bg-green-500/20 border-green-500';
-    if (score >= 60) return 'bg-yellow-500/20 border-yellow-500';
-    return 'bg-red-500/20 border-red-500';
+    if (score >= 80) return "border-green-500/50";
+    if (score >= 60) return "border-yellow-500/50";
+    return "border-red-500/50";
   };
 
-  if (loading) {
-    return (
-      <section className="bg-[#2A2B30] border border-gray-700 rounded-2xl p-6">
-        <h2 className="text-xl font-semibold mb-4">운동 기록</h2>
-        <div className="text-center py-8">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-          <p className="text-gray-400">운동 기록을 불러오는 중...</p>
-        </div>
-      </section>
-    );
-  }
+  const closeModal = () => setSelectedSession(null);
 
-  if (error) {
+  // ✅ 로딩 & 에러 처리
+  if (loading)
     return (
-      <section className="bg-[#2A2B30] border border-gray-700 rounded-2xl p-6">
-        <h2 className="text-xl font-semibold mb-4">운동 기록</h2>
-        <div className="text-center py-8">
-          <div className="text-4xl mb-4">⚠️</div>
-          <p className="text-red-400 mb-4">{error}</p>
-          <button
-            onClick={loadSessions}
-            className="bg-orange-500 hover:bg-orange-600 px-4 py-2 rounded-lg transition"
-          >
-            다시 시도
-          </button>
-        </div>
-      </section>
+      <main className="bg-[#1E1F23] min-h-screen flex flex-col items-center justify-center text-white">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-4"></div>
+        <p className="text-gray-400">운동 기록을 불러오는 중...</p>
+      </main>
     );
-  }
 
-  return (
-    <section className="bg-[#2A2B30] border border-gray-700 rounded-2xl p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-semibold">운동 기록</h2>
+  if (error)
+    return (
+      <main className="bg-[#1E1F23] min-h-screen flex flex-col items-center justify-center text-white">
+        <div className="text-5xl mb-4">⚠️</div>
+        <p className="text-red-400 mb-4">{error}</p>
         <button
           onClick={loadSessions}
-          className="text-sm text-gray-400 hover:text-white transition"
+          className="bg-orange-500 hover:bg-orange-600 px-6 py-3 rounded-lg transition"
         >
-          🔄 새로고침
+          다시 시도
         </button>
+      </main>
+    );
+
+  // ✅ 메인
+  return (
+    <main className="bg-[#1E1F23] text-white min-h-screen pt-24 pb-12">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between mb-8 border-b border-gray-700 pb-3">
+          <h2 className="text-2xl font-bold">운동 기록</h2>
+          <button
+            onClick={loadSessions}
+            className="text-sm text-gray-400 hover:text-white transition"
+          >
+            🔄 새로고침
+          </button>
+        </div>
+
+        {sessions.length === 0 ? (
+          <div className="text-center py-24">
+            <div className="text-6xl mb-4">🏋️</div>
+            <p className="text-gray-400 mb-2">아직 운동 기록이 없습니다</p>
+            <p className="text-sm text-gray-500">
+              운동을 완료하고 기록을 저장해보세요!
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {sessions
+              .sort(
+                (a, b) =>
+                  new Date(b.session_start).getTime() -
+                  new Date(a.session_start).getTime()
+              )
+              .map((session, idx) => {
+                const score = session.session_score || 0;
+                const duration = calculateDuration(
+                  session.session_start,
+                  session.session_end
+                );
+                const isAIUsed =
+                  session.feedbacks && session.feedbacks.length > 0;
+
+                return (
+                  <div
+                    key={idx}
+                    className={`border ${getScoreBgColor(
+                      score
+                    )} bg-[#2A2B30] p-6 cursor-pointer hover:bg-[#323338] transition`}
+                    onClick={() => setSelectedSession(session)}
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <p className="text-sm text-gray-400">
+                          {formatDate(session.session_start)}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          운동 시간: {duration}분
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span
+                          className={`text-4xl font-bold ${getScoreColor(
+                            score
+                          )}`}
+                        >
+                          {score}
+                        </span>
+                        <span className="text-gray-400 text-sm ml-1">점</span>
+                      </div>
+                    </div>
+                    <div className="text-xs mb-3">
+                      {isAIUsed ? (
+                        <span className="text-green-400">🤖 AI 분석 적용</span>
+                      ) : (
+                        <span className="text-gray-400">⚪ AI 분석 미적용</span>
+                      )}
+                    </div>
+
+                    {session.exercises && session.exercises.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-gray-400 mb-2">
+                          수행한 운동:
+                        </p>
+                        <div className="flex flex-wrap gap-2 text-sm">
+                          {session.exercises.map((ex, i) => (
+                            <span
+                              key={i}
+                              className="bg-black/20 border border-gray-600 px-3 py-1"
+                            >
+                              {ex.exercise_name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
 
-      {sessions.length === 0 ? (
-        <div className="text-center py-12">
-          <div className="text-5xl mb-4">🏋️</div>
-          <p className="text-gray-400 mb-2">아직 운동 기록이 없습니다</p>
-          <p className="text-sm text-gray-500">운동을 완료하고 기록을 저장해보세요!</p>
-        </div>
-      ) : (
-        <div className="space-y-4 max-h-[600px] overflow-y-auto">
-          {sessions
-            .sort((a, b) => new Date(b.session_start).getTime() - new Date(a.session_start).getTime())
-            .map((session) => {
-              const score = session.session_score || 0;
-              const duration = calculateDuration(session.session_start, session.session_end);
+      {/* ✅ 상세 모달 */}
+      {selectedSession && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-[#2A2B30] border border-gray-700 w-[95%] max-w-4xl p-6 relative rounded-xl overflow-y-auto max-h-[90vh]">
+            <button
+              onClick={closeModal}
+              className="absolute top-3 right-4 text-gray-400 hover:text-white text-xl"
+            >
+              ✖
+            </button>
+            <h3 className="text-2xl font-bold mb-4">
+              운동 세션 상세 ({formatDate(selectedSession.session_start)})
+            </h3>
 
-              return (
-                <div
-                  key={session.session_id}
-                  className={`border rounded-lg p-5 ${getScoreBgColor(score)}`}
+            {/* ✅ 그래프 */}
+            {selectedSession.feedbacks &&
+            selectedSession.feedbacks.length > 0 ? (
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart
+                  data={selectedSession.feedbacks.map((f) => ({
+                    name: f.exercise_id || "운동",
+                    score: 100 - f.lost_score,
+                  }))}
+                  margin={{ top: 20, right: 30, left: 0, bottom: 10 }}
                 >
-                  {/* 헤더 */}
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <p className="text-sm text-gray-400">
-                        {formatDate(session.session_start)}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        운동 시간: {duration}분
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <span className={`text-4xl font-bold ${getScoreColor(score)}`}>
-                        {score}
-                      </span>
-                      <span className="text-gray-400 text-sm ml-1">점</span>
-                    </div>
-                  </div>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#555" />
+                  <XAxis dataKey="name" stroke="#ccc" />
+                  <YAxis domain={[0, 100]} stroke="#ccc" />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#2A2B30",
+                      border: "1px solid #555",
+                      color: "#fff",
+                    }}
+                  />
+                  <Bar dataKey="score" fill="#f97316" barSize={40} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-gray-400 mt-6 text-center">
+                AI 분석 데이터가 없습니다.
+              </p>
+            )}
 
-                  {/* 노트 */}
-                  {session.session_note && (
-                    <p className="text-sm text-gray-300 mb-3">
-                      {session.session_note}
-                    </p>
-                  )}
-
-                  {/* 피드백 */}
-                  {session.feedbacks && session.feedbacks.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-gray-400 mb-2">
-                        운동별 피드백:
-                      </p>
-                      {session.feedbacks.map((feedback, idx) => (
-                        <div
-                          key={idx}
-                          className="bg-black/20 rounded-lg p-3 text-sm"
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-semibold">
-                              운동 #{idx + 1}
-                            </span>
-                            <span className="text-xs text-gray-400">
-                              감점: {feedback.lost_score}점
-                            </span>
-                          </div>
-                          <p className="text-gray-300 text-xs">
-                            {feedback.feedback_text}
+            {/* ✅ 세부 운동 정보 */}
+            {selectedSession.exercises && (
+              <div className="mt-8 space-y-4">
+                <h4 className="text-lg font-semibold text-gray-200 mb-3">
+                  세부 운동 정보
+                </h4>
+                {selectedSession.exercises.map((ex, i) => {
+                  const feedback = selectedSession.feedbacks?.find(
+                    (f) => f.exercise_id === ex.exercise_id
+                  );
+                  return (
+                    <div
+                      key={i}
+                      className="border border-gray-700 bg-black/20 rounded-lg p-4"
+                    >
+                      <div className="flex flex-wrap justify-between items-center">
+                        <div>
+                          <p className="font-semibold text-lg">
+                            {ex.exercise_name}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            세트: {ex.exercise_sets || "-"}회 / 반복:{" "}
+                            {ex.exercise_reps || "-"}회
                           </p>
                         </div>
-                      ))}
+                        <div className="text-right">
+                          <span
+                            className={`text-3xl font-bold ${getScoreColor(
+                              ex.average_score || 0
+                            )}`}
+                          >
+                            {ex.average_score ?? "-"}
+                          </span>
+                          <span className="text-sm text-gray-400 ml-1">점</span>
+                        </div>
+                      </div>
+
+                      {feedback && (
+                        <p className="text-sm text-gray-300 mt-2">
+                          💬 {feedback.feedback_text}
+                        </p>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="mt-8 flex justify-center">
+              <button
+                onClick={closeModal}
+                className="bg-orange-500 hover:bg-orange-600 px-6 py-2 rounded-lg transition"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
         </div>
       )}
-    </section>
+    </main>
   );
 };
 
