@@ -699,32 +699,6 @@ function ExerciseDetail() {
                       {poseAnalysis.score}
                     </span>
                   </div>
-                  <div className="space-y-0.5 text-[11px]">
-                    <div>
-                      어깨:{" "}
-                      <span className="text-green-400">
-                        {poseAnalysis.shoulders}
-                      </span>
-                    </div>
-                    <div>
-                      골반:{" "}
-                      <span className="text-green-400">
-                        {poseAnalysis.hips}
-                      </span>
-                    </div>
-                    <div>
-                      척추:{" "}
-                      <span className="text-green-400">
-                        {poseAnalysis.spine}
-                      </span>
-                    </div>
-                    <div>
-                      팔:{" "}
-                      <span className="text-green-400">
-                        {poseAnalysis.elbows}
-                      </span>
-                    </div>
-                  </div>
 
                   {poseAnalysis.errorCodes.length > 0 && (
                     <>
