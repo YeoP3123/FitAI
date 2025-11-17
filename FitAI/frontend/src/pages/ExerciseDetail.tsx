@@ -699,12 +699,6 @@ function ExerciseDetail() {
                       {poseAnalysis.score}
                     </span>
                   </div>
-                  <div className="mb-2">
-                    <span className="font-bold text-purple-400">점수:</span>
-                    <span className="ml-2 text-green-400 font-bold text-base">
-                      {poseAnalysis.score}
-                    </span>
-                  </div>
                   <div className="space-y-0.5 text-[11px]">
                     <div>
                       어깨:{" "}
