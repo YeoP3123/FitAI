@@ -250,7 +250,7 @@ function ExerciseDetail() {
       tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
       const imageData = tempCanvas.toDataURL("image/jpeg", 0.8);
 
-      const response = await fetch("http://localhost:8000/api/analyze-pose", {
+      const response = await fetch("http://43.200.191.41:8000/api/analyze-pose", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
